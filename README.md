@@ -43,12 +43,12 @@ Settings for pytest, coverage and ruff live in `pyproject.toml`.
 
 | Job | Runs |
 |---|---|
-| `install` | `uv sync --frozen`, and saves the uv cache (keyed on `uv.lock`) |
+| `install` | `uv sync --locked`, and saves the uv cache (keyed on `uv.lock`) |
 | `lint` | `ruff check libs tests` |
 | `test` | `pytest` with the 95% coverage gate |
 | `audit` | `pip-audit` on the locked runtime dependencies |
 
-Later jobs restore the cache from `install`, so their own `uv sync --frozen` only has to link the packages. Commit `uv.lock` whenever you change dependencies, or `--frozen` makes CI fail.
+Later jobs restore the cache from `install`, so their own `uv sync --locked` only has to link the packages. Commit `uv.lock` whenever you change dependencies, or `--locked` makes CI fail.
 
 ### Code rules
 

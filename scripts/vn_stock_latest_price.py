@@ -3,7 +3,7 @@
 Usage: python3 -I scripts/vn_stock_latest_price.py <SYMBOL>   (or set env SYMBOL)
 Sources tried in order: DNSE -> VPS -> VNDirect. Prices are in thousand VND.
 """
-import json, os, sys, time, urllib.request
+import json, os, re, sys, time, urllib.request
 from datetime import datetime, timedelta, timezone
 
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
@@ -40,8 +40,8 @@ def vndirect(sym):
 
 if __name__ == "__main__":
     sym = (sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SYMBOL", "")).upper()
-    if not sym:
-        sys.exit("usage: vn_stock_latest_price.py <SYMBOL>")
+    if not re.fullmatch(r"[A-Z0-9]{1,10}", sym):  # the symbol goes into URLs: reject "FPT#x", "FPT&y=1"
+        sys.exit("usage: vn_stock_latest_price.py <SYMBOL>  (letters/digits, max 10)")
     errors = []
     for name, fn in (("DNSE", dnse), ("VPS", vps), ("VNDirect", vndirect)):
         try:

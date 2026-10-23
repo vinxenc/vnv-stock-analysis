@@ -57,6 +57,9 @@ def test_price_coerces_and_validates() -> None:
         {"volume": -1},
         {"low": 58.0},  # low above open/close
         {"high": 56.0},  # high below open/close
+        {"low": 10.01, "high": 10.0, "open": 10.005, "close": 10.005},  # low above high, hidden by the open/close slack
+        {"high": float("inf")},  # non-finite
+        {"close": float("nan")},
     ],
 )
 def test_price_rejects_inconsistent_values(bad: dict[str, float]) -> None:

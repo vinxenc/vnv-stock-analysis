@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from datetime import date, timedelta, timezone
 from typing import Any, Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
 VN_TZ = timezone(timedelta(hours=7))
@@ -18,6 +18,8 @@ class PriceNotFoundError(ValueError):
 
 class Price(BaseModel):
     """Latest daily OHLCV of one stock. Prices are in thousand VND."""
+
+    model_config = ConfigDict(allow_inf_nan=False)
 
     symbol: str
     source: str
@@ -32,7 +34,9 @@ class Price(BaseModel):
     @model_validator(mode="after")
     def check_range(self) -> Self:
         # 0.01 slack: adjusted prices are rounded per field, so open/close may poke out of low/high by a hair
-        if not (self.low - 0.01 <= min(self.open, self.close) and max(self.open, self.close) <= self.high + 0.01):
+        if self.low > self.high or not (
+            self.low - 0.01 <= min(self.open, self.close) and max(self.open, self.close) <= self.high + 0.01
+        ):
             raise ValueError(f"inconsistent OHLC: {self.open=} {self.high=} {self.low=} {self.close=}")
         return self
 
