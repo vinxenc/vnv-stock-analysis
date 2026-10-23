@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from libs.prices import PriceNotFoundError, Prices, PriceSource, VNDirect
+from libs.prices import Price, PriceNotFoundError, PriceSource, VNDirect
 
 TARGET = "libs.prices.vndirect.http_get_json"
 
@@ -18,15 +18,15 @@ PAYLOAD = {
 }
 
 
-def test_get_price_uses_adjusted_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_latest_price_uses_adjusted_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     urls: list[str] = []
     monkeypatch.setattr(TARGET, lambda url: urls.append(url) or PAYLOAD)
     source = VNDirect()
 
-    price = source.get_price("fpt")
+    price = source.get_latest_price("fpt")
 
     assert isinstance(source, PriceSource)
-    assert price == Prices(
+    assert price == Price(
         symbol="FPT", source="VNDirect", date=date(2026, 10, 23), open=57.2, high=57.2, low=56.6, close=57.0,
         volume=7090600,
     )
@@ -37,7 +37,7 @@ def test_unknown_ticker_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(TARGET, lambda url: {"data": []})
 
     with pytest.raises(PriceNotFoundError, match="ZZZ"):
-        VNDirect().get_price("ZZZ")
+        VNDirect().get_latest_price("ZZZ")
 
 
 def test_invalid_symbol_rejected_before_any_request(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,4 +47,4 @@ def test_invalid_symbol_rejected_before_any_request(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(TARGET, boom)
 
     with pytest.raises(PriceNotFoundError, match="invalid symbol"):
-        VNDirect().get_price("FPT~floor:HOSE")
+        VNDirect().get_latest_price("FPT~floor:HOSE")

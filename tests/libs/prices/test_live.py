@@ -9,7 +9,7 @@ SOURCES = [DNSE, VPS, VNDirect]
 
 @pytest.mark.parametrize("cls", SOURCES)
 def test_live_fpt(cls: type[PriceSource]) -> None:
-    price = cls().get_price("FPT")
+    price = cls().get_latest_price("FPT")
 
     assert price.symbol == "FPT" and price.source == cls.name
     assert 0 < price.low <= price.close <= price.high
@@ -19,4 +19,4 @@ def test_live_fpt(cls: type[PriceSource]) -> None:
 @pytest.mark.parametrize("cls", SOURCES)
 def test_live_unknown_ticker(cls: type[PriceSource]) -> None:
     with pytest.raises(PriceNotFoundError):
-        cls().get_price("ZZZZZZ")
+        cls().get_latest_price("ZZZZZZ")

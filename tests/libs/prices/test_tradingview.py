@@ -52,12 +52,12 @@ def test_tradingview_last_empty_raises() -> None:
         tradingview_last("X", "FPT", {"t": []})
 
 
-def test_get_price_builds_url_with_ten_day_window(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_latest_price_builds_url_with_ten_day_window(monkeypatch: pytest.MonkeyPatch) -> None:
     urls: list[str] = []
     monkeypatch.setattr(TARGET, lambda url: urls.append(url) or {"t": []})
 
     with pytest.raises(PriceNotFoundError):
-        Fake().get_price("fpt")
+        Fake().get_latest_price("fpt")
 
     path, query = urls[0].split("?")
     start, end = (int(p.split("=")[1]) for p in query.split("&"))
@@ -65,14 +65,14 @@ def test_get_price_builds_url_with_ten_day_window(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.parametrize("bad", ["FPT&x=1", ""])
-def test_get_price_rejects_invalid_symbol_before_any_request(monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
+def test_get_latest_price_rejects_invalid_symbol_before_any_request(monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
     def boom(url: str) -> dict:
         raise AssertionError("request must not be made")
 
     monkeypatch.setattr(TARGET, boom)
 
     with pytest.raises(PriceNotFoundError, match="invalid symbol"):
-        Fake().get_price(bad)
+        Fake().get_latest_price(bad)
 
 
 @pytest.mark.parametrize("code", [400, 404])
@@ -83,7 +83,7 @@ def test_unknown_ticker_http_errors_become_not_found(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(TARGET, fail)
 
     with pytest.raises(PriceNotFoundError, match=str(code)):
-        Fake().get_price("ZZZ")
+        Fake().get_latest_price("ZZZ")
 
 
 def test_other_http_errors_propagate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,4 +93,4 @@ def test_other_http_errors_propagate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(TARGET, fail)
 
     with pytest.raises(HTTPError):
-        Fake().get_price("FPT")
+        Fake().get_latest_price("FPT")

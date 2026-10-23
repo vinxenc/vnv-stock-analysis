@@ -18,7 +18,7 @@ class PriceNotFoundError(ValueError):
     """The ticker is invalid or the source has no data for it."""
 
 
-class Prices(BaseModel):
+class Price(BaseModel):
     """Latest daily OHLCV of one stock. Prices are in thousand VND."""
 
     symbol: str
@@ -45,7 +45,7 @@ class PriceSource(ABC):
     name: str
 
     @abstractmethod
-    def get_price(self, symbol: str) -> Prices:
+    def get_latest_price(self, symbol: str) -> Price:
         """Latest daily price of `symbol`.
 
         Raises PriceNotFoundError for an invalid or unknown ticker. Other failures

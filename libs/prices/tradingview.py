@@ -3,16 +3,16 @@ from abc import abstractmethod
 from datetime import datetime
 from urllib.error import HTTPError
 
-from .base import VN_TZ, PriceNotFoundError, Prices, PriceSource, http_get_json, validate_symbol
+from .base import VN_TZ, Price, PriceNotFoundError, PriceSource, http_get_json, validate_symbol
 
 LOOKBACK_SECONDS = 86400 * 10
 
 
-def tradingview_last(source: str, symbol: str, d: dict) -> Prices:
+def tradingview_last(source: str, symbol: str, d: dict) -> Price:
     """DNSE and VPS share the TradingView-style layout: parallel arrays t/o/h/l/c/v."""
     if not d.get("t"):
         raise PriceNotFoundError(f"no data for {symbol} (unknown ticker?)")
-    return Prices(
+    return Price(
         symbol=symbol,
         source=source,
         date=datetime.fromtimestamp(d["t"][-1], VN_TZ).date(),
@@ -31,7 +31,7 @@ class TradingViewSource(PriceSource):
     def url(self, symbol: str, start: int, end: int) -> str:
         """History URL for `symbol` between the unix timestamps `start` and `end`."""
 
-    def get_price(self, symbol: str) -> Prices:
+    def get_latest_price(self, symbol: str) -> Price:
         symbol = validate_symbol(symbol)
         now = int(time.time())
         try:

@@ -6,15 +6,15 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from libs.prices import PriceNotFoundError, Prices, PriceSource
+from libs.prices import Price, PriceNotFoundError, PriceSource
 from libs.prices.base import UA, http_get_json, validate_symbol
 
 
-def make(**overrides: float | str) -> Prices:
+def make(**overrides: float | str) -> Price:
     fields: dict[str, Any] = dict(
         symbol="FPT", source="X", date="2026-10-23", open=57.2, high=57.5, low=56.6, close=57.0, volume=100
     )
-    return Prices(**{**fields, **overrides})
+    return Price(**{**fields, **overrides})
 
 
 def test_http_get_json_sends_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -41,12 +41,12 @@ def test_validate_symbol_rejects(raw: str) -> None:
         validate_symbol(raw)
 
 
-def test_prices_coerces_and_validates() -> None:
+def test_price_coerces_and_validates() -> None:
     p = make(volume="5")
 
     assert p.date == date(2026, 10, 23) and p.volume == 5
     with pytest.raises(ValidationError):
-        Prices(symbol="FPT", source="X")
+        Price(symbol="FPT", source="X")
 
 
 @pytest.mark.parametrize(
@@ -59,16 +59,16 @@ def test_prices_coerces_and_validates() -> None:
         {"high": 56.0},  # high below open/close
     ],
 )
-def test_prices_rejects_inconsistent_values(bad: dict[str, float]) -> None:
+def test_price_rejects_inconsistent_values(bad: dict[str, float]) -> None:
     with pytest.raises(ValidationError):
         make(**bad)
 
 
-def test_prices_tolerates_rounding_noise() -> None:
+def test_price_tolerates_rounding_noise() -> None:
     assert make(open=57.505).high == 57.5  # 0.005 above high, within tolerance
 
 
-def test_prices_allows_zero_volume() -> None:
+def test_price_allows_zero_volume() -> None:
     assert make(volume=0).volume == 0
 
 

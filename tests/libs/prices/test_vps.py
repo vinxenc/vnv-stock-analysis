@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from libs.prices import VPS, PriceNotFoundError, Prices, PriceSource
+from libs.prices import VPS, Price, PriceNotFoundError, PriceSource
 
 TARGET = "libs.prices.tradingview.http_get_json"
 
@@ -22,15 +22,15 @@ PAYLOAD = {
 }
 
 
-def test_get_price(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_latest_price(monkeypatch: pytest.MonkeyPatch) -> None:
     urls: list[str] = []
     monkeypatch.setattr(TARGET, lambda url: urls.append(url) or PAYLOAD)
     source = VPS()
 
-    price = source.get_price("fpt")
+    price = source.get_latest_price("fpt")
 
     assert isinstance(source, PriceSource)
-    assert price == Prices(
+    assert price == Price(
         symbol="FPT", source="VPS", date=date(2026, 10, 23), open=57.2, high=57.2, low=56.6, close=57.0, volume=7090600
     )
     assert urls[0].startswith("https://histdatafeed.vps.com.vn/") and "symbol=FPT&" in urls[0]
@@ -40,4 +40,4 @@ def test_unknown_ticker_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(TARGET, lambda url: {"t": []})
 
     with pytest.raises(PriceNotFoundError, match="ZZZ"):
-        VPS().get_price("ZZZ")
+        VPS().get_latest_price("ZZZ")
