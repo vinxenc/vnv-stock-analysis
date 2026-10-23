@@ -10,8 +10,6 @@ from pydantic import BaseModel, Field, model_validator
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
 VN_TZ = timezone(timedelta(hours=7))
 SYMBOL_RE = re.compile(r"[A-Z0-9]{1,10}")
-# adjusted prices are rounded per field, so open/close may poke out of low/high by a hair
-PRICE_TOLERANCE = 0.01
 
 
 class PriceNotFoundError(ValueError):
@@ -33,10 +31,8 @@ class Price(BaseModel):
 
     @model_validator(mode="after")
     def check_range(self) -> Self:
-        if not (
-            self.low - PRICE_TOLERANCE <= min(self.open, self.close)
-            and max(self.open, self.close) <= self.high + PRICE_TOLERANCE
-        ):
+        # 0.01 slack: adjusted prices are rounded per field, so open/close may poke out of low/high by a hair
+        if not (self.low - 0.01 <= min(self.open, self.close) and max(self.open, self.close) <= self.high + 0.01):
             raise ValueError(f"inconsistent OHLC: {self.open=} {self.high=} {self.low=} {self.close=}")
         return self
 

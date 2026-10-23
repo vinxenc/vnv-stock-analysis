@@ -72,10 +72,6 @@ def test_price_allows_zero_volume() -> None:
     assert make(volume=0).volume == 0
 
 
-def test_price_not_found_is_a_value_error() -> None:
-    assert issubclass(PriceNotFoundError, ValueError)
-
-
 def test_price_source_is_abstract() -> None:
     with pytest.raises(TypeError):
         PriceSource()

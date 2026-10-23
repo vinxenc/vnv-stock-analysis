@@ -1,14 +1,20 @@
 from datetime import UTC, date, datetime
+from email.message import Message
+from urllib.error import HTTPError
 
 import pytest
 
 from libs.prices import DNSE, Price, PriceNotFoundError, PriceSource
 
-TARGET = "libs.prices.tradingview.http_get_json"
+TARGET = "libs.prices.dnse.http_get_json"
 
 
 def ts(*args: int) -> int:
     return int(datetime(*args, tzinfo=UTC).timestamp())
+
+
+def http_error(code: int) -> HTTPError:
+    return HTTPError("https://example.test", code, "err", Message(), None)
 
 
 # two sessions; the second one is the latest and must be picked
@@ -36,8 +42,47 @@ def test_get_latest_price(monkeypatch: pytest.MonkeyPatch) -> None:
     assert urls[0].startswith("https://services.entrade.com.vn/") and "symbol=FPT&" in urls[0]
 
 
-def test_unknown_ticker_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_date_uses_vietnam_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 18:00 UTC on the 22nd is already the 23rd in UTC+7
+    d = {"t": [ts(2026, 10, 22, 18)], "o": [1], "h": [1], "l": [1], "c": [1], "v": [1]}
+    monkeypatch.setattr(TARGET, lambda url: d)
+
+    assert DNSE().get_latest_price("FPT").date == date(2026, 10, 23)
+
+
+def test_empty_payload_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(TARGET, lambda url: {"t": []})
 
     with pytest.raises(PriceNotFoundError, match="ZZZ"):
         DNSE().get_latest_price("ZZZ")
+
+
+def test_invalid_symbol_rejected_before_any_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(url: str) -> dict:
+        raise AssertionError("request must not be made")
+
+    monkeypatch.setattr(TARGET, boom)
+
+    with pytest.raises(PriceNotFoundError, match="invalid symbol"):
+        DNSE().get_latest_price("FPT&x=1")
+
+
+@pytest.mark.parametrize("code", [400, 404])
+def test_unknown_ticker_http_errors_become_not_found(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+    def fail(url: str) -> dict:
+        raise http_error(code)
+
+    monkeypatch.setattr(TARGET, fail)
+
+    with pytest.raises(PriceNotFoundError, match=str(code)):
+        DNSE().get_latest_price("ZZZ")
+
+
+def test_other_http_errors_propagate(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(url: str) -> dict:
+        raise http_error(503)
+
+    monkeypatch.setattr(TARGET, fail)
+
+    with pytest.raises(HTTPError):
+        DNSE().get_latest_price("FPT")
