@@ -1,16 +1,11 @@
-import time
-
-from .base import Prices, PriceSource, http_get_json, tradingview_last
+from .tradingview import TradingViewSource
 
 
-class VPS(PriceSource):
+class VPS(TradingViewSource):
     name = "VPS"
 
-    def get_price(self, symbol: str) -> Prices:
-        symbol = symbol.upper()
-        now = int(time.time())
-        d = http_get_json(
+    def url(self, symbol: str, start: int, end: int) -> str:
+        return (
             "https://histdatafeed.vps.com.vn/tradingview/history"
-            f"?symbol={symbol}&resolution=1D&from={now - 86400 * 10}&to={now}"
+            f"?symbol={symbol}&resolution=1D&from={start}&to={end}"
         )
-        return tradingview_last(self.name, symbol, d)

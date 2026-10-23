@@ -1,16 +1,11 @@
-import time
-
-from .base import Prices, PriceSource, http_get_json, tradingview_last
+from .tradingview import TradingViewSource
 
 
-class DNSE(PriceSource):
+class DNSE(TradingViewSource):
     name = "DNSE"
 
-    def get_price(self, symbol: str) -> Prices:
-        symbol = symbol.upper()
-        now = int(time.time())
-        d = http_get_json(
+    def url(self, symbol: str, start: int, end: int) -> str:
+        return (
             "https://services.entrade.com.vn/chart-api/v2/ohlcs/stock"
-            f"?from={now - 86400 * 10}&to={now}&symbol={symbol}&resolution=1D"
+            f"?from={start}&to={end}&symbol={symbol}&resolution=1D"
         )
-        return tradingview_last(self.name, symbol, d)

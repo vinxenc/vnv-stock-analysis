@@ -57,8 +57,10 @@ Later jobs restore the cache from `install`, so their own `uv sync --frozen` onl
 ### Layout
 
 ```
-libs/prices/   base.py (Prices, PriceSource, helpers), dnse.py, vps.py, vndirect.py
-tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
+libs/prices/   base.py (Prices, PriceSource, PriceNotFoundError, helpers), tradingview.py (shared DNSE/VPS logic), dnse.py, vps.py, vndirect.py
+tests/libs/prices/   test_base.py, test_tradingview.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
 ```
 
-To add a source, subclass `PriceSource` in `libs/prices/`, export it in `__init__.py`, and add a matching `tests/libs/prices/test_<name>.py`.
+Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Prices` rejects non-positive prices, a negative volume, and open/close outside low/high.
+
+To add a source, subclass `PriceSource` in `libs/prices/` (or `TradingViewSource` if it serves TradingView-style history and you only need to build the URL), export it in `__init__.py`, and add a matching `tests/libs/prices/test_<name>.py`.

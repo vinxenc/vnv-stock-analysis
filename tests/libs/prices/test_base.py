@@ -1,16 +1,20 @@
 import io
 import urllib.request
-from datetime import UTC, date, datetime
+from datetime import date
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
-from libs.prices import Prices, PriceSource
-from libs.prices.base import UA, http_get_json, tradingview_last
+from libs.prices import PriceNotFoundError, Prices, PriceSource
+from libs.prices.base import UA, http_get_json, validate_symbol
 
 
-def ts(*args: int) -> int:
-    return int(datetime(*args, tzinfo=UTC).timestamp())
+def make(**overrides: float | str) -> Prices:
+    fields: dict[str, Any] = dict(
+        symbol="FPT", source="X", date="2026-10-23", open=57.2, high=57.5, low=56.6, close=57.0, volume=100
+    )
+    return Prices(**{**fields, **overrides})
 
 
 def test_http_get_json_sends_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -26,39 +30,50 @@ def test_http_get_json_sends_user_agent(monkeypatch: pytest.MonkeyPatch) -> None
     assert seen == [("https://example.test/x", UA["User-Agent"], 15)]
 
 
-def test_tradingview_last_picks_latest_row() -> None:
-    d = {
-        "t": [ts(2026, 10, 22, 3), ts(2026, 10, 23, 3)],
-        "o": [1, 2],
-        "h": [1, 3],
-        "l": [1, 0.5],
-        "c": [1, 2.5],
-        "v": [10, 20],
-    }
-
-    p = tradingview_last("X", "FPT", d)
-
-    assert (p.date, p.open, p.high, p.low, p.close, p.volume) == (date(2026, 10, 23), 2, 3, 0.5, 2.5, 20)
+@pytest.mark.parametrize("raw, expected", [("fpt", "FPT"), (" vnm ", "VNM"), ("E1VFVN30", "E1VFVN30")])
+def test_validate_symbol_normalises(raw: str, expected: str) -> None:
+    assert validate_symbol(raw) == expected
 
 
-def test_tradingview_date_uses_vietnam_timezone() -> None:
-    # 18:00 UTC on the 22nd is already the 23rd in UTC+7
-    d = {"t": [ts(2026, 10, 22, 18)], "o": [1], "h": [1], "l": [1], "c": [1], "v": [1]}
-
-    assert tradingview_last("X", "FPT", d).date == date(2026, 10, 23)
-
-
-def test_tradingview_last_empty_raises() -> None:
-    with pytest.raises(ValueError, match="FPT"):
-        tradingview_last("X", "FPT", {"t": []})
+@pytest.mark.parametrize("raw", ["", "FPT&resolution=1W", "FPT~floor:HOSE", "F PT", "../x", "TOOLONGSYMBOL1"])
+def test_validate_symbol_rejects(raw: str) -> None:
+    with pytest.raises(PriceNotFoundError, match="invalid symbol"):
+        validate_symbol(raw)
 
 
 def test_prices_coerces_and_validates() -> None:
-    p = Prices(symbol="FPT", source="X", date="2026-10-23", open=1, high=1, low=1, close=1, volume="5")
+    p = make(volume="5")
 
     assert p.date == date(2026, 10, 23) and p.volume == 5
     with pytest.raises(ValidationError):
         Prices(symbol="FPT", source="X")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"low": 0},  # non-positive price
+        {"close": -1},
+        {"volume": -1},
+        {"low": 58.0},  # low above open/close
+        {"high": 56.0},  # high below open/close
+    ],
+)
+def test_prices_rejects_inconsistent_values(bad: dict[str, float]) -> None:
+    with pytest.raises(ValidationError):
+        make(**bad)
+
+
+def test_prices_tolerates_rounding_noise() -> None:
+    assert make(open=57.505).high == 57.5  # 0.005 above high, within tolerance
+
+
+def test_prices_allows_zero_volume() -> None:
+    assert make(volume=0).volume == 0
+
+
+def test_price_not_found_is_a_value_error() -> None:
+    assert issubclass(PriceNotFoundError, ValueError)
 
 
 def test_price_source_is_abstract() -> None:
