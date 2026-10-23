@@ -1,13 +1,53 @@
-name: VN Stock Analysis
+name: VN-Stock-Analysis
 
 on:
   schedule:
-    # 08:00 giờ VN (UTC+7) = 01:00 UTC, thứ 2 - thứ 6
-    - cron: "0 1 * * 1-5"
+    # 22:00 giờ VN (UTC+7) = 15:00 UTC, thứ 2 - thứ 6
+    - cron: "0 15 * * 1-5"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  run:
+  start-analyze:
     runs-on: ubuntu-latest
     steps:
       - run: echo "start pipeline vn stock analysis"
+
+  is_holiday:
+    needs: start-analyze
+    runs-on: ubuntu-latest
+    outputs:
+      holiday: ${{ steps.check.outputs.holiday }}
+      state: ${{ steps.check.outputs.state }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false
+      - name: Install dependencies
+        run: uv sync --locked --no-dev
+      - name: Check today (Vietnam time)
+        id: check
+        # the script exits 0 on a day off, 1 on a working day
+        run: |
+          if uv run --no-sync python scripts/vn_holiday.py; then
+            echo "holiday=true" >> "$GITHUB_OUTPUT"
+            echo 'state={"level": "warning", "message": "Today is Holiday, Pipeline will ignore"}' >> "$GITHUB_OUTPUT"
+          else
+            echo "holiday=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  notification:
+    needs: is_holiday
+    if: needs.is_holiday.outputs.holiday == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          STATE: ${{ needs.is_holiday.outputs.state }}
+        run: echo "$STATE"

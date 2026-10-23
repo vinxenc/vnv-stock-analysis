@@ -10,7 +10,8 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `scripts/vn_stock_latest_price.py` | CLI that prints the latest price of one symbol as JSON, trying DNSE, then VPS, then VNDirect. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
-| `.github/workflows/vn-stock-analysis.yml` | Weekday cron (08:00 Vietnam time), currently a placeholder step. |
+| `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 1 = working day. |
+| `.github/workflows/vn-stock-analysis.yml` | `VN-Stock-Analysis`: weekday cron (22:00 Vietnam time). Jobs: `start-analyze` (placeholder) → `is_holiday` → `notification` (only on a day off, echoes a `{level, message}` state). |
 
 The endpoints are undocumented and may change or block without notice.
 
