@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Runs first and fills the uv cache (keyed on uv.lock); the jobs below restore it.
+  install:
+    name: Install dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+
+  lint:
+    name: Ruff check
+    needs: install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false
+      - name: Install dependencies (from cache)
+        run: uv sync --locked
+      - name: Ruff check
+        run: uv run ruff check libs tests
+
+  test:
+    name: Unit tests + coverage
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false
+      - name: Install dependencies (from cache)
+        run: uv sync --locked
+      - name: Unit tests (coverage gate from pyproject.toml)
+        run: uv run pytest
+
+  audit:
+    name: Dependency vulnerability scan
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false
+      - name: Install dependencies (from cache)
+        run: uv sync --locked
+      - name: Export locked runtime dependencies
+        run: uv export --locked --no-dev --no-emit-project --no-hashes --quiet -o requirements-audit.txt
+      - name: pip-audit
+        run: uv run pip-audit -r requirements-audit.txt --no-deps --disable-pip
