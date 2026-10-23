@@ -1,0 +1,13 @@
+name: VN Stock Analysis
+
+on:
+  schedule:
+    # 08:00 giờ VN (UTC+7) = 01:00 UTC, thứ 2 - thứ 6
+    - cron: "0 1 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "start pipeline vn stock analysis"
