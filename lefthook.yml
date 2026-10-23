@@ -1,0 +1,7 @@
+pre-commit:
+  parallel: false
+  commands:
+    lint:
+      run: uv run ruff check libs tests
+    test:
+      run: uv run pytest
