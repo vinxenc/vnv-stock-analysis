@@ -1,7 +1,6 @@
 from datetime import UTC, date, datetime
-from email.message import Message
-from urllib.error import HTTPError
 
+import niquests
 import pytest
 
 from libs.prices import DNSE, Price, PriceNotFoundError, PriceSource
@@ -13,8 +12,11 @@ def ts(*args: int) -> int:
     return int(datetime(*args, tzinfo=UTC).timestamp())
 
 
-def http_error(code: int) -> HTTPError:
-    return HTTPError("https://example.test", code, "err", Message(), None)
+def http_error(code: int) -> niquests.HTTPError:
+    response = niquests.Response()
+    response.status_code = code
+    return niquests.HTTPError(response=response)
+
 
 
 # two sessions; the second one is the latest and must be picked
@@ -84,5 +86,5 @@ def test_other_http_errors_propagate(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(TARGET, fail)
 
-    with pytest.raises(HTTPError):
+    with pytest.raises(niquests.HTTPError):
         DNSE().get_latest_price("FPT")

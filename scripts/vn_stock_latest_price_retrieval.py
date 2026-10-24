@@ -14,11 +14,13 @@ from pathlib import Path
 
 from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_fixed
 
+from libs.logger import Logger, LogxideLogger
 from libs.prices import DNSE, VPS, Price, PriceNotFoundError, PriceSource, VNDirect
 from libs.prices.base import validate_symbol
 
 NO_DATA = 4  # not 1: Python exits 1 on an uncaught error, which must not read as "no data"
 SOURCES = (DNSE(), VPS(), VNDirect())
+LOG = LogxideLogger("vn_stock_latest_price_retrieval")
 
 
 def read_symbols(path: Path) -> list[str]:
@@ -57,6 +59,7 @@ def main(
     sources: Sequence[PriceSource] = SOURCES,
     delay: float = 2.0,
     sleep: Callable[[float], None] = time.sleep,
+    log: Logger = LOG,
 ) -> int:
     symbols = read_symbols(symbols_csv)
     prices: list[Price] = []
@@ -67,13 +70,13 @@ def main(
             price = get_price(symbol, sources)
         except RuntimeError as e:
             skipped.append(symbol)
-            print(f"[{i}/{len(symbols)}] {symbol} skipped: {e}", flush=True)
+            log.warning("[%d/%d] %s skipped: %s", i, len(symbols), symbol, e)
         else:
             prices.append(price)
-            print(f"[{i}/{len(symbols)}] {symbol} ok ({price.source})", flush=True)
-    print(f"fetched {len(prices)}, skipped {len(skipped)}: {' '.join(skipped)}", flush=True)
+            log.info("[%d/%d] %s ok (%s)", i, len(symbols), symbol, price.source)
+    log.info("fetched %d, skipped %d: %s", len(prices), len(skipped), " ".join(skipped))
     if not prices:
-        print("no price fetched, nothing written", file=sys.stderr)
+        log.error("no price fetched, nothing written")
         output_json.unlink(missing_ok=True)  # never leave an earlier run's file looking like today's result
         return NO_DATA
     output_json.parent.mkdir(parents=True, exist_ok=True)

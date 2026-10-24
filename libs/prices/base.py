@@ -1,15 +1,16 @@
-import json
 import re
-import urllib.request
 from abc import ABC, abstractmethod
 from datetime import date, timedelta, timezone
 from typing import Any, Self
 
+import niquests
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
 VN_TZ = timezone(timedelta(hours=7))
 SYMBOL_RE = re.compile(r"[A-Z0-9]{1,10}")
+SESSION = niquests.Session()  # one session: connections are reused across the 400+ calls of a run
+SESSION.headers.update(UA)
 
 
 class PriceNotFoundError(ValueError):
@@ -62,5 +63,6 @@ def validate_symbol(symbol: str) -> str:
 
 
 def http_get_json(url: str) -> dict[str, Any]:
-    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=15) as r:
-        return json.load(r)
+    r = SESSION.get(url, timeout=15)
+    r.raise_for_status()
+    return r.json()

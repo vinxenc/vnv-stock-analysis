@@ -7,6 +7,7 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | Path | What |
 |---|---|
 | `libs/prices/` | `DNSE`, `VPS`, `VNDirect` classes. Each has `get_latest_price(symbol) -> Price`. `Price` is a pydantic model (symbol, source, date, open, high, low, close, volume; thousand VND). |
+| `libs/logger/` | `Logger` interface (`debug/info/warning/error`) and `LogxideLogger`, its adapter over [logxide](https://github.com/Indosaram/logxide). Logs go to stderr. |
 | `scripts/vn_stock_latest_price_retrieval.py` | Fetches the latest price of every symbol in `data/hose_symbols.csv` (DNSE → VPS → VNDirect, 1 retry per source, 2 s between symbols) and writes one JSON array. A symbol that fails everywhere is skipped; exit 4 if none was fetched. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
@@ -60,6 +61,8 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 ```
 libs/prices/   base.py (Price, PriceSource, PriceNotFoundError, helpers), dnse.py, vps.py, vndirect.py
 tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
+libs/logger/   base.py (Logger), logxide.py (LogxideLogger)
+tests/libs/logger/   test_logxide.py
 scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py
 tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py
 ```

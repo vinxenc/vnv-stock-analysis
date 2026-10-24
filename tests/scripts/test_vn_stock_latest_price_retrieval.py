@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from libs.logger import Logger
 from libs.prices import Price, PriceNotFoundError, PriceSource
 from scripts.vn_stock_latest_price_retrieval import NO_DATA, fetch, get_price, main, read_symbols
 
@@ -31,6 +32,25 @@ def retry_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     slept: list[float] = []
     monkeypatch.setattr(fetch.retry, "sleep", slept.append)
     return slept
+
+
+class FakeLogger(Logger):
+    """Keeps `(level, formatted message)` pairs."""
+
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str]] = []
+
+    def debug(self, msg: str, *args: object) -> None:
+        self.records.append(("debug", msg % args))
+
+    def info(self, msg: str, *args: object) -> None:
+        self.records.append(("info", msg % args))
+
+    def warning(self, msg: str, *args: object) -> None:
+        self.records.append(("warning", msg % args))
+
+    def error(self, msg: str, *args: object) -> None:
+        self.records.append(("error", msg % args))
 
 
 def write_csv(path: Path, *codes: str) -> Path:
@@ -83,13 +103,14 @@ def test_all_sources_fail() -> None:
     assert sum(len(s.calls) for s in sources) == 6
 
 
-def test_main_skips_failed_symbol(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_skips_failed_symbol(tmp_path: Path) -> None:
     csv_path, out = write_csv(tmp_path / "s.csv", "AAA", "BBB", "CCC"), tmp_path / "sub" / "out.json"
     a = FakeSource("A", None, PriceNotFoundError("x"), None)
     b = FakeSource("B", PriceNotFoundError("y"))
     slept: list[float] = []
+    log = FakeLogger()
 
-    assert main(csv_path, out, [a, b], delay=2.0, sleep=slept.append) == 0
+    assert main(csv_path, out, [a, b], delay=2.0, sleep=slept.append, log=log) == 0
 
     data = json.loads(out.read_text(encoding="utf-8"))
     assert [p["symbol"] for p in data] == ["AAA", "CCC"]
@@ -98,16 +119,18 @@ def test_main_skips_failed_symbol(tmp_path: Path, capsys: pytest.CaptureFixture[
         "open": 1.0, "high": 2.0, "low": 1.0, "close": 2.0, "volume": 10,
     }  # fmt: skip
     assert slept == [2.0, 2.0]  # n - 1 delays between symbols; not-found is not retried
-    stdout = capsys.readouterr().out
-    assert "[1/3] AAA ok (A)" in stdout
-    assert "[2/3] BBB skipped" in stdout
-    assert "skipped 1: BBB" in stdout
+    assert log.records[0] == ("info", "[1/3] AAA ok (A)")
+    assert log.records[1][0] == "warning"
+    assert log.records[1][1].startswith("[2/3] BBB skipped")
+    assert log.records[-1] == ("info", "fetched 2, skipped 1: BBB")
 
 
 def test_main_no_data_writes_nothing(tmp_path: Path) -> None:
     out = tmp_path / "out.json"
     csv_path = write_csv(tmp_path / "s.csv", "AAA", "BBB")
-    assert main(csv_path, out, [FakeSource("A", *[OSError()] * 4)], sleep=lambda _: None) == NO_DATA
+    log = FakeLogger()
+    assert main(csv_path, out, [FakeSource("A", *[OSError()] * 4)], sleep=lambda _: None, log=log) == NO_DATA
+    assert log.records[-1] == ("error", "no price fetched, nothing written")
     assert NO_DATA == 4  # the workflow's `case 4)` hard-codes this value
     assert not out.exists()
 

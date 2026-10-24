@@ -4,6 +4,8 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "holidays>=0.107",
+    "logxide>=0.3.0",
+    "niquests>=3.21.2",
     "pydantic>=2",
     "tenacity>=9.2.1",
 ]

@@ -1,6 +1,7 @@
 import time
 from datetime import datetime
-from urllib.error import HTTPError
+
+import niquests
 
 from .base import VN_TZ, Price, PriceNotFoundError, PriceSource, http_get_json, validate_symbol
 
@@ -16,9 +17,10 @@ class DNSE(PriceSource):
                 "https://services.entrade.com.vn/chart-api/v2/ohlcs/stock"
                 f"?from={now - 86400 * 10}&to={now}&symbol={symbol}&resolution=1D"
             )
-        except HTTPError as e:
-            if e.code in (400, 404):  # DNSE answers 400 for a ticker it does not know
-                raise PriceNotFoundError(f"no data for {symbol} (HTTP {e.code})") from e
+        except niquests.HTTPError as e:
+            code = e.response.status_code
+            if code in (400, 404):  # DNSE answers 400 for a ticker it does not know
+                raise PriceNotFoundError(f"no data for {symbol} (HTTP {code})") from e
             raise
         if not d.get("t"):
             raise PriceNotFoundError(f"no data for {symbol} (unknown ticker?)")
