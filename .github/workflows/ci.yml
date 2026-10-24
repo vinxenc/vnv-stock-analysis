@@ -24,6 +24,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
+          prune-cache: false  # pruning drops the pre-built wheels, leaving an empty cache
       - name: Install dependencies
         run: uv sync --locked
 

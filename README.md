@@ -52,6 +52,8 @@ Settings for pytest, coverage and ruff live in `pyproject.toml`.
 
 Later jobs restore the cache from `install`, so their own `uv sync --locked` only has to link the packages. Commit `uv.lock` whenever you change dependencies, or `--locked` makes CI fail.
 
+**uv cache rule** (`ci.yml` and `vn-stock-analysis.yml`): only the `install` job saves the cache, and it sets `prune-cache: false` on `astral-sh/setup-uv`. By default `setup-uv` runs `uv cache prune --ci` before saving, which deletes pre-built wheels; all our dependencies are wheels, so the saved cache was about 1 KB and every job downloaded the packages again. Every other job sets `save-cache: false`, restores the cache, and runs its own `uv sync --locked` to link the packages.
+
 ### Code rules
 
 - Always add type hints: every function parameter and return type, and class fields (use pydantic models for data that crosses a function boundary). It makes the code easier to read and understand. Ruff's `ANN` rules enforce this, so the lint (and the pre-commit hook) fails on a missing hint.
