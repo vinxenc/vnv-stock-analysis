@@ -28,6 +28,8 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
+          prune-cache: false  # pruning drops the pre-built wheels, leaving an empty cache
+          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
       - name: Install dependencies
         run: uv sync --locked --no-dev
 
@@ -46,6 +48,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           save-cache: false
+          prune-cache: false  # part of the cache key: must match the install job to hit its cache
+          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
       - name: Install dependencies (from cache)
         run: uv sync --locked --no-dev
       - name: Check today (Vietnam time)
@@ -80,6 +84,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           save-cache: false
+          prune-cache: false  # part of the cache key: must match the install job to hit its cache
+          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
       - name: Install dependencies (from cache)
         run: uv sync --locked --no-dev
       - name: Retrieve latest prices

@@ -24,6 +24,7 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
+          prune-cache: false  # pruning drops the pre-built wheels, leaving an empty cache
       - name: Install dependencies
         run: uv sync --locked
 
@@ -40,6 +41,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           save-cache: false
+          prune-cache: false  # part of the cache key: must match the install job to hit its cache
       - name: Install dependencies (from cache)
         run: uv sync --locked
       - name: Ruff check
@@ -58,6 +60,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           save-cache: false
+          prune-cache: false  # part of the cache key: must match the install job to hit its cache
       - name: Install dependencies (from cache)
         run: uv sync --locked
       - name: Unit tests (coverage gate from pyproject.toml)
@@ -76,6 +79,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           save-cache: false
+          prune-cache: false  # part of the cache key: must match the install job to hit its cache
       - name: Install dependencies (from cache)
         run: uv sync --locked
       - name: Export locked runtime dependencies
