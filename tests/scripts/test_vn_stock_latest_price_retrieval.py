@@ -80,7 +80,7 @@ def test_first_source_ok_no_sleep(retry_sleeps: list[float]) -> None:
 def test_retries_same_source_once(retry_sleeps: list[float]) -> None:
     first, second = FakeSource("A", OSError("boom")), FakeSource("B")
     assert get_price("FPT", [first, second]).source == "A"
-    assert (len(first.calls), len(second.calls), retry_sleeps) == (2, 0, [2])
+    assert (len(first.calls), len(second.calls), retry_sleeps) == (2, 0, [1])
 
 
 def test_falls_back_after_two_failures() -> None:
@@ -110,7 +110,7 @@ def test_main_skips_failed_symbol(tmp_path: Path) -> None:
     slept: list[float] = []
     log = FakeLogger()
 
-    assert main(csv_path, out, [first, second], delay=2.0, sleep=slept.append, log=log) == 0
+    assert main(csv_path, out, [first, second], sleep=slept.append, log=log) == 0
 
     data = json.loads(out.read_text(encoding="utf-8"))
     assert [entry["symbol"] for entry in data] == ["AAA", "CCC"]
@@ -118,7 +118,7 @@ def test_main_skips_failed_symbol(tmp_path: Path) -> None:
         "symbol": "AAA", "source": "A", "unit": "thousand VND", "date": "2026-10-23",
         "open": 1.0, "high": 2.0, "low": 1.0, "close": 2.0, "volume": 10,
     }  # fmt: skip
-    assert slept == [2.0, 2.0]  # n - 1 delays between symbols; not-found is not retried
+    assert slept == [1.0, 1.0]  # n - 1 delays between symbols; not-found is not retried
     assert log.records[0] == ("info", "[1/3] AAA ok (A)")
     assert log.records[1][0] == "warning"
     assert log.records[1][1].startswith("[2/3] BBB skipped")

@@ -29,7 +29,7 @@ def read_symbols(path: Path) -> list[str]:
 
 
 @retry(
-    stop=stop_after_attempt(2), wait=wait_fixed(2), retry=retry_if_not_exception_type(PriceNotFoundError), reraise=True
+    stop=stop_after_attempt(2), wait=wait_fixed(1), retry=retry_if_not_exception_type(PriceNotFoundError), reraise=True
 )
 def fetch(source: PriceSource, symbol: str) -> Price:
     """One source, 1 retry after a failure; an unknown ticker will not appear on a second try, so no retry then."""
@@ -57,7 +57,7 @@ def main(
     symbols_csv: Path = Path("data/hose_symbols.csv"),
     output_json: Path = Path("out/vn_stock_latest_prices.json"),
     sources: Sequence[PriceSource] = SOURCES,
-    delay: float = 2.0,
+    delay: float = 1.0,
     sleep: Callable[[float], None] = time.sleep,
     log: Logger = logger,
 ) -> int:
