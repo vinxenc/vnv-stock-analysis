@@ -15,8 +15,24 @@ jobs:
     steps:
       - run: echo "start pipeline vn stock analysis"
 
-  is_holiday:
+  # Runs first and fills the uv cache (keyed on uv.lock); the jobs below restore it.
+  install:
+    name: Install dependencies
     needs: start-analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install dependencies
+        run: uv sync --locked --no-dev
+
+  is_holiday:
+    needs: install
     runs-on: ubuntu-latest
     outputs:
       holiday: ${{ steps.check.outputs.holiday }}
@@ -30,7 +46,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           save-cache: false
-      - name: Install dependencies
+      - name: Install dependencies (from cache)
         run: uv sync --locked --no-dev
       - name: Check today (Vietnam time)
         id: check
@@ -64,7 +80,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
           save-cache: false
-      - name: Install dependencies
+      - name: Install dependencies (from cache)
         run: uv sync --locked --no-dev
       - name: Retrieve latest prices
         id: retrieve

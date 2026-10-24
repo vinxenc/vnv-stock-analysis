@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from libs.prices import Price, PriceNotFoundError, PriceSource
-from scripts.vn_stock_latest_price_retrieval import NO_DATA, get_price, main, read_symbols
+from scripts.vn_stock_latest_price_retrieval import NO_DATA, fetch, get_price, main, read_symbols
 
 
 class FakeSource(PriceSource):
@@ -25,6 +25,14 @@ class FakeSource(PriceSource):
         return Price(symbol=symbol, source=self.name, date="2026-10-23", open=1, high=2, low=1, close=2, volume=10)
 
 
+@pytest.fixture(autouse=True)
+def retry_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Record tenacity's waits between attempts instead of sleeping."""
+    slept: list[float] = []
+    monkeypatch.setattr(fetch.retry, "sleep", slept.append)
+    return slept
+
+
 def write_csv(path: Path, *codes: str) -> Path:
     path.write_text("code,short_name\n" + "".join(f"{c},Tên {c}\n" for c in codes), encoding="utf-8")
     return path
@@ -34,42 +42,43 @@ def test_read_symbols_keeps_order(tmp_path: Path) -> None:
     assert read_symbols(write_csv(tmp_path / "s.csv", "vcb", "FPT", "AAA")) == ["VCB", "FPT", "AAA"]
 
 
+def test_read_symbols_dedupes_keeping_order(tmp_path: Path) -> None:
+    assert read_symbols(write_csv(tmp_path / "s.csv", "VCB", "FPT", "vcb", "FPT")) == ["VCB", "FPT"]
+
+
 def test_read_symbols_rejects_bad_symbol(tmp_path: Path) -> None:
     with pytest.raises(PriceNotFoundError, match="invalid symbol"):
         read_symbols(write_csv(tmp_path / "s.csv", "FPT", "F&X"))
 
 
-def test_first_source_ok_no_sleep() -> None:
+def test_first_source_ok_no_sleep(retry_sleeps: list[float]) -> None:
     a, b = FakeSource("A"), FakeSource("B")
-    slept: list[float] = []
-    assert get_price("FPT", [a, b], sleep=slept.append).source == "A"
-    assert (len(a.calls), len(b.calls), slept) == (1, 0, [])
+    assert get_price("FPT", [a, b]).source == "A"
+    assert (len(a.calls), len(b.calls), retry_sleeps) == (1, 0, [])
 
 
-def test_retries_same_source_once() -> None:
+def test_retries_same_source_once(retry_sleeps: list[float]) -> None:
     a, b = FakeSource("A", OSError("boom")), FakeSource("B")
-    slept: list[float] = []
-    assert get_price("FPT", [a, b], retry_delay=1.5, sleep=slept.append).source == "A"
-    assert (len(a.calls), len(b.calls), slept) == (2, 0, [1.5])
+    assert get_price("FPT", [a, b]).source == "A"
+    assert (len(a.calls), len(b.calls), retry_sleeps) == (2, 0, [2])
 
 
 def test_falls_back_after_two_failures() -> None:
     a, b = FakeSource("A", OSError("1"), OSError("2")), FakeSource("B")
-    assert get_price("FPT", [a, b], sleep=lambda _: None).source == "B"
+    assert get_price("FPT", [a, b]).source == "B"
     assert (len(a.calls), len(b.calls)) == (2, 1)
 
 
-def test_not_found_is_not_retried() -> None:
+def test_not_found_is_not_retried(retry_sleeps: list[float]) -> None:
     a, b = FakeSource("A", PriceNotFoundError("nope")), FakeSource("B")
-    slept: list[float] = []
-    assert get_price("FPT", [a, b], sleep=slept.append).source == "B"
-    assert (len(a.calls), len(b.calls), slept) == (1, 1, [])
+    assert get_price("FPT", [a, b]).source == "B"
+    assert (len(a.calls), len(b.calls), retry_sleeps) == (1, 1, [])
 
 
 def test_all_sources_fail() -> None:
     sources = [FakeSource(n, OSError(f"{n}1"), OSError(f"{n}2")) for n in ("A", "B", "C")]
     with pytest.raises(RuntimeError) as e:
-        get_price("FPT", sources, sleep=lambda _: None)
+        get_price("FPT", sources)
     assert all(f"{n}: OSError: {n}2" in str(e.value) for n in ("A", "B", "C"))
     assert sum(len(s.calls) for s in sources) == 6
 
@@ -88,7 +97,7 @@ def test_main_skips_failed_symbol(tmp_path: Path, capsys: pytest.CaptureFixture[
         "symbol": "AAA", "source": "A", "unit": "thousand VND", "date": "2026-10-23",
         "open": 1.0, "high": 2.0, "low": 1.0, "close": 2.0, "volume": 10,
     }  # fmt: skip
-    assert slept == [2.0, 2.0]  # n - 1 delays between symbols, no retry wait (not-found is not retried)
+    assert slept == [2.0, 2.0]  # n - 1 delays between symbols; not-found is not retried
     stdout = capsys.readouterr().out
     assert "[1/3] AAA ok (A)" in stdout
     assert "[2/3] BBB skipped" in stdout
@@ -103,8 +112,25 @@ def test_main_no_data_writes_nothing(tmp_path: Path) -> None:
     assert not out.exists()
 
 
+def test_main_no_data_removes_stale_output(tmp_path: Path) -> None:
+    out = tmp_path / "out.json"
+    out.write_text("[]", encoding="utf-8")
+    csv_path = write_csv(tmp_path / "s.csv", "AAA")
+    assert main(csv_path, out, [FakeSource("A", *[OSError()] * 2)], sleep=lambda _: None) == NO_DATA
+    assert not out.exists()
+
+
 def test_crash_is_not_no_data(tmp_path: Path) -> None:
     cmd = [sys.executable, "-m", "scripts.vn_stock_latest_price_retrieval", str(tmp_path / "missing.csv")]
     r = subprocess.run(cmd, capture_output=True, cwd=Path(__file__).parents[2])
     assert r.returncode == 1
     assert b"FileNotFoundError" in r.stderr
+
+
+def test_main_stops_at_time_limit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    out = tmp_path / "out.json"
+    csv_path = write_csv(tmp_path / "s.csv", "AAA", "BBB", "CCC")
+    ticks = iter([0, 1, 2, 100])  # start, check before AAA, before BBB, before CCC (over the 50 limit)
+    assert main(csv_path, out, [FakeSource("A")], sleep=lambda _: None, max_runtime=50, clock=lambda: next(ticks)) == 0
+    assert [p["symbol"] for p in json.loads(out.read_text(encoding="utf-8"))] == ["AAA", "BBB"]
+    assert "time limit reached, 1 symbols not tried" in capsys.readouterr().out

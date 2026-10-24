@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "holidays>=0.107",
     "pydantic>=2",
+    "tenacity>=9.2.1",
 ]
 
 [dependency-groups]
