@@ -2,7 +2,10 @@
 name = "vnv-stock-analysis"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2"]
+dependencies = [
+    "holidays>=0.107",
+    "pydantic>=2",
+]
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "pip-audit>=2.7"]
