@@ -1,10 +1,9 @@
-import json
 import re
-import urllib.request
 from abc import ABC, abstractmethod
 from datetime import date, timedelta, timezone
 from typing import Any, Self
 
+import niquests
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
@@ -62,5 +61,6 @@ def validate_symbol(symbol: str) -> str:
 
 
 def http_get_json(url: str) -> dict[str, Any]:
-    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=15) as r:
-        return json.load(r)
+    result = niquests.get(url, headers=UA, timeout=15)
+    result.raise_for_status()
+    return result.json()

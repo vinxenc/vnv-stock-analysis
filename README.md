@@ -7,11 +7,12 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | Path | What |
 |---|---|
 | `libs/prices/` | `DNSE`, `VPS`, `VNDirect` classes. Each has `get_latest_price(symbol) -> Price`. `Price` is a pydantic model (symbol, source, date, open, high, low, close, volume; thousand VND). |
-| `scripts/vn_stock_latest_price.py` | CLI that prints the latest price of one symbol as JSON, trying DNSE, then VPS, then VNDirect. |
+| `libs/logger/` | `Logger` interface (`debug/info/warning/error`) and `LogxideLogger`, its adapter over [logxide](https://github.com/Indosaram/logxide). Logs go to stderr. |
+| `scripts/vn_stock_latest_price_retrieval.py` | Fetches the latest price of every symbol in `data/hose_symbols.csv` (DNSE → VPS → VNDirect, 1 retry per source, 1 s between symbols) and writes one JSON array. A symbol that fails everywhere is skipped; exit 4 if none was fetched. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
 | `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
-| `.github/workflows/vn-stock-analysis.yml` | `VN-Stock-Analysis`: weekday cron (22:00 Vietnam time). Jobs: `start-analyze` (placeholder) → `is_holiday` → `notification` (only on a day off, echoes a `{level, message}` state). |
+| `.github/workflows/vn-stock-analysis.yml` | `VN-Stock-Analysis`: weekday cron (22:00 Vietnam time). Jobs: `start-analyze` (placeholder) → `is_holiday` → `notification` (level-coloured annotation: warning on a day off, error when no price was fetched) \| `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and prints it for now). |
 
 The endpoints are undocumented and may change or block without notice.
 
@@ -28,11 +29,11 @@ lefthook install         # one-time: enable the pre-commit hook
 
 | Command | What it does |
 |---|---|
-| `uv run pytest` | Unit tests (no network) with coverage on `libs/`. Fails if coverage is under 95%. |
+| `uv run pytest` | Unit tests (no network) with coverage on `libs/` and `scripts/`. Fails if coverage is under 95%. |
 | `uv run pytest -m live --no-cov` | Live smoke tests against the real endpoints. Not run by default. |
-| `uv run ruff check libs tests` | Lint. Add `--fix` to auto-fix. |
+| `uv run ruff check libs scripts tests` | Lint. Add `--fix` to auto-fix. |
 | `lefthook run pre-commit` | Run the pre-commit checks by hand. |
-| `python3 -I scripts/vn_stock_latest_price.py FPT` | Print the latest FPT price as JSON. The `SYMBOL` env var also works. |
+| `uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]` | Fetch the latest price of all symbols (default `data/hose_symbols.csv`, takes about 20 min) and write `out/vn_stock_latest_prices.json`. |
 
 The pre-commit hook (`lefthook.yml`) runs the lint, then the unit tests with the coverage gate. A commit is blocked if either fails.
 
@@ -45,7 +46,7 @@ Settings for pytest, coverage and ruff live in `pyproject.toml`.
 | Job | Runs |
 |---|---|
 | `install` | `uv sync --locked`, and saves the uv cache (keyed on `uv.lock`) |
-| `lint` | `ruff check libs tests` |
+| `lint` | `ruff check libs scripts tests` |
 | `test` | `pytest` with the 95% coverage gate |
 | `audit` | `pip-audit` on the locked runtime dependencies |
 
@@ -54,12 +55,18 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 ### Code rules
 
 - Always add type hints: every function parameter and return type, and class fields (use pydantic models for data that crosses a function boundary). It makes the code easier to read and understand. Ruff's `ANN` rules enforce this, so the lint (and the pre-commit hook) fails on a missing hint.
+- Give variables clear, descriptive names: no single-letter or cryptic names (`r`, `d`, `e`, `p`, `i`). Write `result`, `data`, `error`, `price`, `index` instead.
+- Use UPPER_CASE only for constants (fixed values such as `NO_DATA`, `UA`, `SYMBOL_RE`). Anything else, like a logger, a client or a session, is lower case. Create it inside a function or as a lower-case variable, not as an upper-case global.
 
 ### Layout
 
 ```
 libs/prices/   base.py (Price, PriceSource, PriceNotFoundError, helpers), dnse.py, vps.py, vndirect.py
 tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
+libs/logger/   base.py (Logger), logxide.py (LogxideLogger)
+tests/libs/logger/   test_logxide.py
+scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py
+tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py
 ```
 
 Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, a negative volume, and open/close outside low/high.

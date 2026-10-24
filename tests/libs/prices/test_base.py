@@ -1,8 +1,7 @@
-import io
-import urllib.request
 from datetime import date
 from typing import Any
 
+import niquests
 import pytest
 from pydantic import ValidationError
 
@@ -17,17 +16,33 @@ def make(**overrides: float | str) -> Price:
     return Price(**{**fields, **overrides})
 
 
-def test_http_get_json_sends_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+def fake_response(status: int, body: bytes = b"{}") -> niquests.Response:
+    result = niquests.Response()
+    result.status_code = status
+    result._content = body
+    result.url = "https://example.test/x"
+    return result
+
+
+def test_http_get_json_returns_body_with_user_agent_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = []
 
-    def fake_urlopen(req: urllib.request.Request, timeout: int) -> io.BytesIO:
-        seen.append((req.full_url, req.get_header("User-agent"), timeout))
-        return io.BytesIO(b'{"ok": true}')
+    def fake_get(url: str, headers: dict[str, str], timeout: int) -> niquests.Response:
+        seen.append((url, headers, timeout))
+        return fake_response(200, b'{"ok": true}')
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(niquests, "get", fake_get)
 
     assert http_get_json("https://example.test/x") == {"ok": True}
-    assert seen == [("https://example.test/x", UA["User-Agent"], 15)]
+    assert seen == [("https://example.test/x", UA, 15)]
+
+
+def test_http_get_json_raises_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(niquests, "get", lambda url, headers, timeout: fake_response(503))
+
+    with pytest.raises(niquests.HTTPError) as error:
+        http_get_json("https://example.test/x")
+    assert error.value.response.status_code == 503
 
 
 @pytest.mark.parametrize("raw, expected", [("fpt", "FPT"), (" vnm ", "VNM"), ("E1VFVN30", "E1VFVN30")])
@@ -42,9 +57,9 @@ def test_validate_symbol_rejects(raw: str) -> None:
 
 
 def test_price_coerces_and_validates() -> None:
-    p = make(volume="5")
+    price = make(volume="5")
 
-    assert p.date == date(2026, 10, 23) and p.volume == 5
+    assert price.date == date(2026, 10, 23) and price.volume == 5
     with pytest.raises(ValidationError):
         Price(symbol="FPT", source="X")
 

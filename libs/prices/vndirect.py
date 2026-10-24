@@ -11,15 +11,15 @@ class VNDirect(PriceSource):
         )["data"]
         if not rows:
             raise PriceNotFoundError(f"no data for {symbol} (unknown ticker?)")
-        r = rows[0]
+        row = rows[0]
         # ad* = adjusted for dividends/splits, matching DNSE and VPS; plain open/close are raw
         return Price(
             symbol=symbol,
             source=self.name,
-            date=r["date"],
-            open=r["adOpen"],
-            high=r["adHigh"],
-            low=r["adLow"],
-            close=r["adClose"],
-            volume=r["nmVolume"],
+            date=row["date"],
+            open=row["adOpen"],
+            high=row["adHigh"],
+            low=row["adLow"],
+            close=row["adClose"],
+            volume=row["nmVolume"],
         )

@@ -4,7 +4,10 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "holidays>=0.107",
+    "logxide>=0.3.0",
+    "niquests>=3.21.2",
     "pydantic>=2",
+    "tenacity>=9.2.1",
 ]
 
 [dependency-groups]
@@ -17,7 +20,7 @@ package = false
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = ["live: hits the real endpoints (run with `uv run pytest -m live --no-cov`)"]
-addopts = "--import-mode=importlib -m 'not live' --cov=libs --cov-report=term-missing --cov-fail-under=95"
+addopts = "--import-mode=importlib -m 'not live' --cov=libs --cov=scripts --cov-report=term-missing --cov-fail-under=95"
 
 [tool.coverage.run]
 branch = true

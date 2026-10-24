@@ -1,6 +1,6 @@
 pre-commit:
   commands:
     lint:
-      run: uv run ruff check libs tests
+      run: uv run ruff check libs scripts tests
     test:
       run: uv run pytest
