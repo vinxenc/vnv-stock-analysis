@@ -29,9 +29,9 @@ lefthook install         # one-time: enable the pre-commit hook
 
 | Command | What it does |
 |---|---|
-| `uv run pytest` | Unit tests (no network) with coverage on `libs/`. Fails if coverage is under 95%. |
+| `uv run pytest` | Unit tests (no network) with coverage on `libs/` and `scripts/`. Fails if coverage is under 95%. |
 | `uv run pytest -m live --no-cov` | Live smoke tests against the real endpoints. Not run by default. |
-| `uv run ruff check libs tests` | Lint. Add `--fix` to auto-fix. |
+| `uv run ruff check libs scripts tests` | Lint. Add `--fix` to auto-fix. |
 | `lefthook run pre-commit` | Run the pre-commit checks by hand. |
 | `uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]` | Fetch the latest price of all symbols (default `data/hose_symbols.csv`, takes about 20 min) and write `out/vn_stock_latest_prices.json`. |
 
@@ -46,7 +46,7 @@ Settings for pytest, coverage and ruff live in `pyproject.toml`.
 | Job | Runs |
 |---|---|
 | `install` | `uv sync --locked`, and saves the uv cache (keyed on `uv.lock`) |
-| `lint` | `ruff check libs tests` |
+| `lint` | `ruff check libs scripts tests` |
 | `test` | `pytest` with the 95% coverage gate |
 | `audit` | `pip-audit` on the locked runtime dependencies |
 

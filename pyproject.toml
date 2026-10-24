@@ -20,7 +20,7 @@ package = false
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = ["live: hits the real endpoints (run with `uv run pytest -m live --no-cov`)"]
-addopts = "--import-mode=importlib -m 'not live' --cov=libs --cov-report=term-missing --cov-fail-under=95"
+addopts = "--import-mode=importlib -m 'not live' --cov=libs --cov=scripts --cov-report=term-missing --cov-fail-under=95"
 
 [tool.coverage.run]
 branch = true
