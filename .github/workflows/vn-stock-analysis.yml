@@ -47,11 +47,72 @@ jobs:
             *) exit "$rc" ;;
           esac
 
-  notification:
+  retrieve_prices:
+    name: vn stock latest price retrieval
     needs: is_holiday
-    if: needs.is_holiday.outputs.holiday == 'true'
+    if: needs.is_holiday.outputs.holiday == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      state: ${{ steps.retrieve.outputs.state }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false
+      - name: Install dependencies
+        run: uv sync --locked --no-dev
+      - name: Retrieve latest prices
+        id: retrieve
+        # the script exits 0 with a JSON file, 4 when no symbol could be fetched; any other code is a crash
+        run: |
+          rc=0
+          uv run --no-sync python -m scripts.vn_stock_latest_price_retrieval || rc=$?
+          case "$rc" in
+            0) ;;
+            4)
+              echo 'state={"level": "error", "message": "Pipeline failed, can not retrieve any stock price data"}' >> "$GITHUB_OUTPUT"
+              exit 1
+              ;;
+            *) exit "$rc" ;;
+          esac
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: vn-stock-latest-prices
+          path: out/vn_stock_latest_prices.json
+          retention-days: 7
+          if-no-files-found: error
+
+  vn_stock_daily_price_store:
+    name: vn stock daily price store
+    needs: retrieve_prices
     runs-on: ubuntu-latest
     steps:
-      - env:
-          STATE: ${{ needs.is_holiday.outputs.state }}
-        run: echo "$STATE"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: vn-stock-latest-prices
+          path: out
+      - run: cat out/vn_stock_latest_prices.json
+
+  notification:
+    needs: [is_holiday, retrieve_prices]
+    if: >-
+      always() && needs.is_holiday.result == 'success' &&
+      (needs.is_holiday.outputs.holiday == 'true' || needs.retrieve_prices.outputs.state != '')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print state as a coloured annotation
+        env:
+          STATE: ${{ needs.is_holiday.outputs.holiday == 'true' && needs.is_holiday.outputs.state || needs.retrieve_prices.outputs.state }}
+        run: |
+          level=$(jq -r .level <<< "$STATE")
+          msg=$(jq -r .message <<< "$STATE")
+          case "$level" in
+            error) echo "::error::$msg" ;;
+            warning) echo "::warning::$msg" ;;
+            *) echo "::notice::$msg" ;;
+          esac
