@@ -46,8 +46,8 @@ def test_get_latest_price(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_date_uses_vietnam_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
     # 18:00 UTC on the 22nd is already the 23rd in UTC+7
-    d = {"t": [ts(2026, 10, 22, 18)], "o": [1], "h": [1], "l": [1], "c": [1], "v": [1]}
-    monkeypatch.setattr(TARGET, lambda url: d)
+    data = {"t": [ts(2026, 10, 22, 18)], "o": [1], "h": [1], "l": [1], "c": [1], "v": [1]}
+    monkeypatch.setattr(TARGET, lambda url: data)
 
     assert DNSE().get_latest_price("FPT").date == date(2026, 10, 23)
 

@@ -61,6 +61,6 @@ def validate_symbol(symbol: str) -> str:
 
 
 def http_get_json(url: str) -> dict[str, Any]:
-    r = niquests.get(url, headers=UA, timeout=15)
-    r.raise_for_status()
-    return r.json()
+    result = niquests.get(url, headers=UA, timeout=15)
+    result.raise_for_status()
+    return result.json()

@@ -17,11 +17,11 @@ def make(**overrides: float | str) -> Price:
 
 
 def fake_response(status: int, body: bytes = b"{}") -> niquests.Response:
-    r = niquests.Response()
-    r.status_code = status
-    r._content = body
-    r.url = "https://example.test/x"
-    return r
+    result = niquests.Response()
+    result.status_code = status
+    result._content = body
+    result.url = "https://example.test/x"
+    return result
 
 
 def test_http_get_json_returns_body_with_user_agent_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -40,9 +40,9 @@ def test_http_get_json_returns_body_with_user_agent_and_timeout(monkeypatch: pyt
 def test_http_get_json_raises_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(niquests, "get", lambda url, headers, timeout: fake_response(503))
 
-    with pytest.raises(niquests.HTTPError) as e:
+    with pytest.raises(niquests.HTTPError) as error:
         http_get_json("https://example.test/x")
-    assert e.value.response.status_code == 503
+    assert error.value.response.status_code == 503
 
 
 @pytest.mark.parametrize("raw, expected", [("fpt", "FPT"), (" vnm ", "VNM"), ("E1VFVN30", "E1VFVN30")])
@@ -57,9 +57,9 @@ def test_validate_symbol_rejects(raw: str) -> None:
 
 
 def test_price_coerces_and_validates() -> None:
-    p = make(volume="5")
+    price = make(volume="5")
 
-    assert p.date == date(2026, 10, 23) and p.volume == 5
+    assert price.date == date(2026, 10, 23) and price.volume == 5
     with pytest.raises(ValidationError):
         Price(symbol="FPT", source="X")
 

@@ -24,8 +24,8 @@ logger = LogxideLogger("vn_stock_latest_price_retrieval")
 
 
 def read_symbols(path: Path) -> list[str]:
-    with path.open(encoding="utf-8", newline="") as f:
-        return list(dict.fromkeys(validate_symbol(row["code"]) for row in csv.DictReader(f)))  # dedupe, keep order
+    with path.open(encoding="utf-8", newline="") as file:
+        return list(dict.fromkeys(validate_symbol(row["code"]) for row in csv.DictReader(file)))  # dedupe, keep order
 
 
 @retry(
@@ -42,14 +42,14 @@ def get_price(symbol: str, sources: Sequence[PriceSource] = SOURCES) -> Price:
     for source in sources:
         try:
             return fetch(source, symbol)
-        except Exception as e:
-            errors.append(f"{source.name}: {type(e).__name__}: {e}")
+        except Exception as error:
+            errors.append(f"{source.name}: {type(error).__name__}: {error}")
     raise RuntimeError("all sources failed: " + "; ".join(errors))
 
 
-def pause_between(i: int, delay: float, sleep: Callable[[float], None]) -> None:
+def pause_between(index: int, delay: float, sleep: Callable[[float], None]) -> None:
     """Wait `delay` seconds before every symbol except the first (`i` is 1-based)."""
-    if i > 1:
+    if index > 1:
         sleep(delay)
 
 
@@ -64,23 +64,24 @@ def main(
     symbols = read_symbols(symbols_csv)
     prices: list[Price] = []
     skipped: list[str] = []
-    for i, symbol in enumerate(symbols, 1):
-        pause_between(i, delay, sleep)
+    for index, symbol in enumerate(symbols, 1):
+        pause_between(index, delay, sleep)
         try:
             price = get_price(symbol, sources)
-        except RuntimeError as e:
+        except RuntimeError as error:
             skipped.append(symbol)
-            log.warning("[%d/%d] %s skipped: %s", i, len(symbols), symbol, e)
+            log.warning("[%d/%d] %s skipped: %s", index, len(symbols), symbol, error)
         else:
             prices.append(price)
-            log.info("[%d/%d] %s ok (%s)", i, len(symbols), symbol, price.source)
+            log.info("[%d/%d] %s ok (%s)", index, len(symbols), symbol, price.source)
     log.info("fetched %d, skipped %d: %s", len(prices), len(skipped), " ".join(skipped))
     if not prices:
         log.error("no price fetched, nothing written")
         output_json.unlink(missing_ok=True)  # never leave an earlier run's file looking like today's result
         return NO_DATA
     output_json.parent.mkdir(parents=True, exist_ok=True)
-    output_json.write_text(json.dumps([p.model_dump(mode="json") for p in prices], indent=2) + "\n", encoding="utf-8")
+    rows = [price.model_dump(mode="json") for price in prices]
+    output_json.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
     return 0
 
 

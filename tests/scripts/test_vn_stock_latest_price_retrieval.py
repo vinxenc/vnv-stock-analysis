@@ -54,7 +54,7 @@ class FakeLogger(Logger):
 
 
 def write_csv(path: Path, *codes: str) -> Path:
-    path.write_text("code,short_name\n" + "".join(f"{c},Tên {c}\n" for c in codes), encoding="utf-8")
+    path.write_text("code,short_name\n" + "".join(f"{code},Tên {code}\n" for code in codes), encoding="utf-8")
     return path
 
 
@@ -72,48 +72,48 @@ def test_read_symbols_rejects_bad_symbol(tmp_path: Path) -> None:
 
 
 def test_first_source_ok_no_sleep(retry_sleeps: list[float]) -> None:
-    a, b = FakeSource("A"), FakeSource("B")
-    assert get_price("FPT", [a, b]).source == "A"
-    assert (len(a.calls), len(b.calls), retry_sleeps) == (1, 0, [])
+    first, second = FakeSource("A"), FakeSource("B")
+    assert get_price("FPT", [first, second]).source == "A"
+    assert (len(first.calls), len(second.calls), retry_sleeps) == (1, 0, [])
 
 
 def test_retries_same_source_once(retry_sleeps: list[float]) -> None:
-    a, b = FakeSource("A", OSError("boom")), FakeSource("B")
-    assert get_price("FPT", [a, b]).source == "A"
-    assert (len(a.calls), len(b.calls), retry_sleeps) == (2, 0, [2])
+    first, second = FakeSource("A", OSError("boom")), FakeSource("B")
+    assert get_price("FPT", [first, second]).source == "A"
+    assert (len(first.calls), len(second.calls), retry_sleeps) == (2, 0, [2])
 
 
 def test_falls_back_after_two_failures() -> None:
-    a, b = FakeSource("A", OSError("1"), OSError("2")), FakeSource("B")
-    assert get_price("FPT", [a, b]).source == "B"
-    assert (len(a.calls), len(b.calls)) == (2, 1)
+    first, second = FakeSource("A", OSError("1"), OSError("2")), FakeSource("B")
+    assert get_price("FPT", [first, second]).source == "B"
+    assert (len(first.calls), len(second.calls)) == (2, 1)
 
 
 def test_not_found_is_not_retried(retry_sleeps: list[float]) -> None:
-    a, b = FakeSource("A", PriceNotFoundError("nope")), FakeSource("B")
-    assert get_price("FPT", [a, b]).source == "B"
-    assert (len(a.calls), len(b.calls), retry_sleeps) == (1, 1, [])
+    first, second = FakeSource("A", PriceNotFoundError("nope")), FakeSource("B")
+    assert get_price("FPT", [first, second]).source == "B"
+    assert (len(first.calls), len(second.calls), retry_sleeps) == (1, 1, [])
 
 
 def test_all_sources_fail() -> None:
-    sources = [FakeSource(n, OSError(f"{n}1"), OSError(f"{n}2")) for n in ("A", "B", "C")]
-    with pytest.raises(RuntimeError) as e:
+    sources = [FakeSource(name, OSError(f"{name}1"), OSError(f"{name}2")) for name in ("A", "B", "C")]
+    with pytest.raises(RuntimeError) as error:
         get_price("FPT", sources)
-    assert all(f"{n}: OSError: {n}2" in str(e.value) for n in ("A", "B", "C"))
-    assert sum(len(s.calls) for s in sources) == 6
+    assert all(f"{name}: OSError: {name}2" in str(error.value) for name in ("A", "B", "C"))
+    assert sum(len(source.calls) for source in sources) == 6
 
 
 def test_main_skips_failed_symbol(tmp_path: Path) -> None:
     csv_path, out = write_csv(tmp_path / "s.csv", "AAA", "BBB", "CCC"), tmp_path / "sub" / "out.json"
-    a = FakeSource("A", None, PriceNotFoundError("x"), None)
-    b = FakeSource("B", PriceNotFoundError("y"))
+    first = FakeSource("A", None, PriceNotFoundError("x"), None)
+    second = FakeSource("B", PriceNotFoundError("y"))
     slept: list[float] = []
     log = FakeLogger()
 
-    assert main(csv_path, out, [a, b], delay=2.0, sleep=slept.append, log=log) == 0
+    assert main(csv_path, out, [first, second], delay=2.0, sleep=slept.append, log=log) == 0
 
     data = json.loads(out.read_text(encoding="utf-8"))
-    assert [p["symbol"] for p in data] == ["AAA", "CCC"]
+    assert [entry["symbol"] for entry in data] == ["AAA", "CCC"]
     assert data[0] == {
         "symbol": "AAA", "source": "A", "unit": "thousand VND", "date": "2026-10-23",
         "open": 1.0, "high": 2.0, "low": 1.0, "close": 2.0, "volume": 10,
@@ -145,6 +145,6 @@ def test_main_no_data_removes_stale_output(tmp_path: Path) -> None:
 
 def test_crash_is_not_no_data(tmp_path: Path) -> None:
     cmd = [sys.executable, "-m", "scripts.vn_stock_latest_price_retrieval", str(tmp_path / "missing.csv")]
-    r = subprocess.run(cmd, capture_output=True, cwd=Path(__file__).parents[2])
-    assert r.returncode == 1
-    assert b"FileNotFoundError" in r.stderr
+    result = subprocess.run(cmd, capture_output=True, cwd=Path(__file__).parents[2])
+    assert result.returncode == 1
+    assert b"FileNotFoundError" in result.stderr
