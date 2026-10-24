@@ -3,7 +3,6 @@
 Usage: uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]
 Defaults: data/hose_symbols.csv  out/vn_stock_latest_prices.json
 Sources per symbol: DNSE -> VPS -> VNDirect, 1 retry each (tenacity). A symbol that fails everywhere is skipped.
-After MAX_RUNTIME the untried symbols are skipped too.
 Exit 0 = at least one price written, 4 = no price at all (no file written), anything else = crash.
 """
 import csv
@@ -18,7 +17,6 @@ from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wai
 from libs.prices import DNSE, VPS, Price, PriceNotFoundError, PriceSource, VNDirect
 from libs.prices.base import validate_symbol
 
-MAX_RUNTIME = 50 * 60  # seconds; stop before the workflow's 60 min timeout cancels the job and loses the result
 NO_DATA = 4  # not 1: Python exits 1 on an uncaught error, which must not read as "no data"
 SOURCES = (DNSE(), VPS(), VNDirect())
 
@@ -47,26 +45,24 @@ def get_price(symbol: str, sources: Sequence[PriceSource] = SOURCES) -> Price:
     raise RuntimeError("all sources failed: " + "; ".join(errors))
 
 
+def pause_between(i: int, delay: float, sleep: Callable[[float], None]) -> None:
+    """Wait `delay` seconds before every symbol except the first (`i` is 1-based)."""
+    if i > 1:
+        sleep(delay)
+
+
 def main(
     symbols_csv: Path = Path("data/hose_symbols.csv"),
     output_json: Path = Path("out/vn_stock_latest_prices.json"),
     sources: Sequence[PriceSource] = SOURCES,
     delay: float = 2.0,
     sleep: Callable[[float], None] = time.sleep,
-    max_runtime: float = MAX_RUNTIME,
-    clock: Callable[[], float] = time.monotonic,
 ) -> int:
-    started = clock()
     symbols = read_symbols(symbols_csv)
     prices: list[Price] = []
     skipped: list[str] = []
     for i, symbol in enumerate(symbols, 1):
-        if clock() - started > max_runtime:
-            skipped.extend(symbols[i - 1 :])
-            print(f"time limit reached, {len(symbols) - i + 1} symbols not tried", flush=True)
-            break
-        if i > 1:
-            sleep(delay)
+        pause_between(i, delay, sleep)
         try:
             price = get_price(symbol, sources)
         except RuntimeError as e:

@@ -125,12 +125,3 @@ def test_crash_is_not_no_data(tmp_path: Path) -> None:
     r = subprocess.run(cmd, capture_output=True, cwd=Path(__file__).parents[2])
     assert r.returncode == 1
     assert b"FileNotFoundError" in r.stderr
-
-
-def test_main_stops_at_time_limit(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    out = tmp_path / "out.json"
-    csv_path = write_csv(tmp_path / "s.csv", "AAA", "BBB", "CCC")
-    ticks = iter([0, 1, 2, 100])  # start, check before AAA, before BBB, before CCC (over the 50 limit)
-    assert main(csv_path, out, [FakeSource("A")], sleep=lambda _: None, max_runtime=50, clock=lambda: next(ticks)) == 0
-    assert [p["symbol"] for p in json.loads(out.read_text(encoding="utf-8"))] == ["AAA", "BBB"]
-    assert "time limit reached, 1 symbols not tried" in capsys.readouterr().out
