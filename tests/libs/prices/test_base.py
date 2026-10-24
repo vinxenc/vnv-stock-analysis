@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from libs.prices import Price, PriceNotFoundError, PriceSource
-from libs.prices.base import SESSION, UA, http_get_json, validate_symbol
+from libs.prices.base import UA, http_get_json, validate_symbol
 
 
 def make(**overrides: float | str) -> Price:
@@ -27,19 +27,18 @@ def fake_response(status: int, body: bytes = b"{}") -> niquests.Response:
 def test_http_get_json_returns_body_with_user_agent_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = []
 
-    def fake_get(url: str, timeout: int) -> niquests.Response:
-        seen.append((url, timeout))
+    def fake_get(url: str, headers: dict[str, str], timeout: int) -> niquests.Response:
+        seen.append((url, headers, timeout))
         return fake_response(200, b'{"ok": true}')
 
-    monkeypatch.setattr(SESSION, "get", fake_get)
+    monkeypatch.setattr(niquests, "get", fake_get)
 
     assert http_get_json("https://example.test/x") == {"ok": True}
-    assert seen == [("https://example.test/x", 15)]
-    assert SESSION.headers["User-Agent"] == UA["User-Agent"]
+    assert seen == [("https://example.test/x", UA, 15)]
 
 
 def test_http_get_json_raises_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(SESSION, "get", lambda url, timeout: fake_response(503))
+    monkeypatch.setattr(niquests, "get", lambda url, headers, timeout: fake_response(503))
 
     with pytest.raises(niquests.HTTPError) as e:
         http_get_json("https://example.test/x")

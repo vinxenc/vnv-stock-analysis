@@ -20,7 +20,7 @@ from libs.prices.base import validate_symbol
 
 NO_DATA = 4  # not 1: Python exits 1 on an uncaught error, which must not read as "no data"
 SOURCES = (DNSE(), VPS(), VNDirect())
-LOG = LogxideLogger("vn_stock_latest_price_retrieval")
+logger = LogxideLogger("vn_stock_latest_price_retrieval")
 
 
 def read_symbols(path: Path) -> list[str]:
@@ -59,7 +59,7 @@ def main(
     sources: Sequence[PriceSource] = SOURCES,
     delay: float = 2.0,
     sleep: Callable[[float], None] = time.sleep,
-    log: Logger = LOG,
+    log: Logger = logger,
 ) -> int:
     symbols = read_symbols(symbols_csv)
     prices: list[Price] = []

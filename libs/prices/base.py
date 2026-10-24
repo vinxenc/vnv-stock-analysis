@@ -9,8 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
 VN_TZ = timezone(timedelta(hours=7))
 SYMBOL_RE = re.compile(r"[A-Z0-9]{1,10}")
-SESSION = niquests.Session()  # one session: connections are reused across the 400+ calls of a run
-SESSION.headers.update(UA)
 
 
 class PriceNotFoundError(ValueError):
@@ -63,6 +61,6 @@ def validate_symbol(symbol: str) -> str:
 
 
 def http_get_json(url: str) -> dict[str, Any]:
-    r = SESSION.get(url, timeout=15)
+    r = niquests.get(url, headers=UA, timeout=15)
     r.raise_for_status()
     return r.json()
