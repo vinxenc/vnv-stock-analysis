@@ -34,14 +34,18 @@ jobs:
         run: uv sync --locked --no-dev
       - name: Check today (Vietnam time)
         id: check
-        # the script exits 0 on a day off, 1 on a working day
+        # the script exits 0 on a day off, 3 on a working day; any other code is a failed check and fails the job
         run: |
-          if uv run --no-sync python scripts/vn_holiday.py; then
-            echo "holiday=true" >> "$GITHUB_OUTPUT"
-            echo 'state={"level": "warning", "message": "Today is Holiday, Pipeline will ignore"}' >> "$GITHUB_OUTPUT"
-          else
-            echo "holiday=false" >> "$GITHUB_OUTPUT"
-          fi
+          rc=0
+          uv run --no-sync python scripts/vn_holiday.py || rc=$?
+          case "$rc" in
+            0)
+              echo "holiday=true" >> "$GITHUB_OUTPUT"
+              echo 'state={"level": "warning", "message": "Today is Holiday, Pipeline will ignore"}' >> "$GITHUB_OUTPUT"
+              ;;
+            3) echo "holiday=false" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$rc" ;;
+          esac
 
   notification:
     needs: is_holiday
