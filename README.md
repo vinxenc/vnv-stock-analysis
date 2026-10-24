@@ -52,7 +52,7 @@ Settings for pytest, coverage and ruff live in `pyproject.toml`.
 
 Later jobs restore the cache from `install`, so their own `uv sync --locked` only has to link the packages. Commit `uv.lock` whenever you change dependencies, or `--locked` makes CI fail.
 
-**uv cache rule** (`ci.yml` and `vn-stock-analysis.yml`): only the `install` job saves the cache, and it sets `prune-cache: false` on `astral-sh/setup-uv`. By default `setup-uv` runs `uv cache prune --ci` before saving, which deletes pre-built wheels; all our dependencies are wheels, so the saved cache was about 1 KB and every job downloaded the packages again. Every other job sets `save-cache: false`, restores the cache, and runs its own `uv sync --locked` to link the packages.
+**uv cache rule** (`ci.yml` and `vn-stock-analysis.yml`): every `astral-sh/setup-uv` step sets `prune-cache: false`, and only the `install` job saves the cache. By default `setup-uv` runs `uv cache prune --ci` before saving, which deletes pre-built wheels; all our dependencies are wheels, so the saved cache was about 1 KB and every job downloaded the packages again. `prune-cache` is part of the cache key (`...-pruned-...` or not), so a job that restores must use the same value as `install`, or it looks up a different cache and misses. Every job except `install` also sets `save-cache: false`, restores the cache, and runs its own `uv sync --locked` to link the packages.
 
 ### Code rules
 
