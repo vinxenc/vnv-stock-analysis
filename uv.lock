@@ -1447,7 +1447,6 @@ name = "vnv-stock-analysis"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "alembic" },
     { name = "holidays" },
     { name = "logxide" },
     { name = "niquests" },
@@ -1459,6 +1458,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "alembic" },
     { name = "pip-audit" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -1467,7 +1467,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alembic", specifier = ">=1.20.1" },
     { name = "holidays", specifier = ">=0.107" },
     { name = "logxide", specifier = ">=0.3.0" },
     { name = "niquests", specifier = ">=3.21.2" },
@@ -1479,6 +1478,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "alembic", specifier = ">=1.20.1" },
     { name = "pip-audit", specifier = ">=2.7" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-cov", specifier = ">=5" },

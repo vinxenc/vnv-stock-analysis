@@ -1,0 +1,33 @@
+name: Migrate-Database
+
+on:
+  push:
+    branches: [master]
+    paths: [migrations/**]  # only when a migration is merged
+
+# two merges in a row must not migrate at the same time, and a running migration is never cancelled
+concurrency:
+  group: migrate-database
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: false  # pruning drops the pre-built wheels, leaving an empty cache
+      - name: Install dependencies (alembic is a dev dependency)
+        run: uv sync --locked
+      - name: Run migrations
+        run: uv run --no-sync alembic upgrade head
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
