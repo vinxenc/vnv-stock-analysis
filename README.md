@@ -47,7 +47,7 @@ uv run alembic check                                                   # fails i
 
 `docker compose down -v` throws the local database away. Alembic is a dev dependency, so `uv sync` installs it.
 
-In production the `Migrate-Database` workflow applies the migrations on every push to `master` that changes `migrations/` (a merged PR or a direct push). The job uses the `production` environment, so `DATABASE_URL` must be an environment secret there (Settings → Environments → production), e.g. `postgresql+psycopg://user:pass@host:5432/db`.
+In production the `Migrate-Database` workflow applies the migrations on every push to `master` that changes `migrations/` (a merged PR or a direct push). The job uses the `production` environment, so `DATABASE_URL` must be an environment secret there (Settings → Environments → production), e.g. `postgresql+psycopg://user:pass@host:5432/db`. A provider URL starting with `postgres://` also works (`libs.db.database_url` rewrites it); keep `?sslmode=require` if the host needs SSL and URL-encode special characters in the password.
 
 ### Commands
 
