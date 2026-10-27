@@ -13,7 +13,7 @@ def make(**overrides: float | str) -> Price:
     fields: dict[str, Any] = dict(
         symbol="FPT", source="X", date="2026-10-23", open=57.2, high=57.5, low=56.6, close=57.0, volume=100
     )
-    return Price(**{**fields, **overrides})
+    return Price.model_validate({**fields, **overrides})
 
 
 def fake_response(status: int, body: bytes = b"{}") -> niquests.Response:
@@ -61,7 +61,7 @@ def test_price_coerces_and_validates() -> None:
 
     assert price.date == date(2026, 10, 23) and price.volume == 5
     with pytest.raises(ValidationError):
-        Price(symbol="FPT", source="X")
+        Price.model_validate({"symbol": "FPT", "source": "X"})
 
 
 @pytest.mark.parametrize(

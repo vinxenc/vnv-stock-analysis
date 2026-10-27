@@ -9,7 +9,7 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `libs/prices/` | `DNSE`, `VPS`, `VNDirect` classes. Each has `get_latest_price(symbol) -> Price`. `Price` is a pydantic model (symbol, source, date, open, high, low, close, volume; thousand VND). |
 | `libs/logger/` | `Logger` interface (`debug/info/warning/error`) and `LogxideLogger`, its adapter over [logxide](https://github.com/Indosaram/logxide). Logs go to stderr. |
 | `scripts/vn_stock_latest_price_retrieval.py` | Fetches the latest price of every symbol in `data/hose_symbols.csv` (DNSE → VPS → VNDirect, 1 retry per source, 1 s between symbols) and writes one JSON array. A symbol that fails everywhere is skipped; exit 4 if none was fetched. |
-| `libs/db/` | `models.py`: `PriceBase` (the validated price, which `libs.prices.Price` reuses) and `Price`, the `prices` table (primary key `symbol` + `date`). |
+| `libs/db/` | `models.py`: `Price`, the `prices` table (primary key `symbol` + `date`), also the model the price sources return (`libs.prices.Price` reuses it). Create it with `Price.model_validate(data)`: SQLModel skips validation in `Price(**data)`. |
 | `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. |
 | `docker-compose.yml` | Local Postgres 17 (user, password and database all `vnv`). |
 | `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`. Needs the `DATABASE_URL` secret of the `production` environment. |

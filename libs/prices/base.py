@@ -5,7 +5,7 @@ from typing import Any
 
 import niquests
 
-from libs.db.models import PriceBase as Price  # the validated, non-table model; defined in libs/db
+from libs.db.models import Price
 
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
 VN_TZ = timezone(timedelta(hours=7))

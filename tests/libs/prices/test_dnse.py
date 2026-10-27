@@ -38,8 +38,11 @@ def test_get_latest_price(monkeypatch: pytest.MonkeyPatch) -> None:
     price = source.get_latest_price("fpt")
 
     assert isinstance(source, PriceSource)
-    assert price == Price(
-        symbol="FPT", source="DNSE", date=date(2026, 10, 23), open=57.2, high=57.2, low=56.6, close=57.0, volume=7090600
+    assert price == Price.model_validate(
+        dict(
+            symbol="FPT", source="DNSE", date=date(2026, 10, 23), open=57.2, high=57.2, low=56.6, close=57.0,
+            volume=7090600,
+        )
     )
     assert urls[0].startswith("https://services.entrade.com.vn/") and "symbol=FPT&" in urls[0]
 

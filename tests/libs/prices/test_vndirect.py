@@ -26,9 +26,11 @@ def test_get_latest_price_uses_adjusted_fields(monkeypatch: pytest.MonkeyPatch) 
     price = source.get_latest_price("fpt")
 
     assert isinstance(source, PriceSource)
-    assert price == Price(
-        symbol="FPT", source="VNDirect", date=date(2026, 10, 23), open=57.2, high=57.2, low=56.6, close=57.0,
-        volume=7090600,
+    assert price == Price.model_validate(
+        dict(
+            symbol="FPT", source="VNDirect", date=date(2026, 10, 23), open=57.2, high=57.2, low=56.6, close=57.0,
+            volume=7090600,
+        )
     )
     assert "code:FPT&" in urls[0]  # symbol upper-cased in the request
 
