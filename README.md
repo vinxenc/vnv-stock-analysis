@@ -9,6 +9,10 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `libs/prices/` | `DNSE`, `VPS`, `VNDirect` classes. Each has `get_latest_price(symbol) -> Price`. `Price` is a pydantic model (symbol, source, date, open, high, low, close, volume; thousand VND). |
 | `libs/logger/` | `Logger` interface (`debug/info/warning/error`) and `LogxideLogger`, its adapter over [logxide](https://github.com/Indosaram/logxide). Logs go to stderr. |
 | `scripts/vn_stock_latest_price_retrieval.py` | Fetches the latest price of every symbol in `data/hose_symbols.csv` (DNSE → VPS → VNDirect, 1 retry per source, 1 s between symbols) and writes one JSON array. A symbol that fails everywhere is skipped; exit 4 if none was fetched. |
+| `libs/db/` | `models.py`: `Price`, the `prices` table (primary key `symbol` + `date`), also the model the price sources return (`libs.prices.Price` reuses it). Create it with `Price.model_validate(data)`: SQLModel skips validation in `Price(**data)`. |
+| `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. |
+| `docker-compose.yml` | Local Postgres 17 (user, password and database all `vnv`). |
+| `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`. Needs the `DATABASE_URL` secret of the `production` environment. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
 | `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
@@ -24,6 +28,26 @@ Needs [uv](https://docs.astral.sh/uv/) and [lefthook](https://lefthook.dev/) (`b
 uv sync                  # create .venv and install deps (incl. dev tools)
 lefthook install         # one-time: enable the pre-commit hook
 ```
+
+### Database and migrations
+
+```bash
+docker compose up -d --wait                                            # local Postgres on :5432
+export DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv    # alembic reads this
+uv run alembic upgrade head                                            # create / update the tables
+```
+
+After changing `libs/db/models.py`, generate the migration and review it before committing:
+
+```bash
+uv run alembic revision --autogenerate -m "what changed"
+uv run alembic upgrade head                                            # apply it to the local database
+uv run alembic check                                                   # fails if models and migrations differ
+```
+
+`docker compose down -v` throws the local database away. Alembic is a dev dependency, so `uv sync` installs it.
+
+In production the `Migrate-Database` workflow applies the migrations on every push to `master` that changes `migrations/` (a merged PR or a direct push). The job uses the `production` environment, so `DATABASE_URL` must be an environment secret there (Settings → Environments → production), e.g. `postgresql+psycopg://user:pass@host:5432/db`.
 
 ### Commands
 
@@ -71,6 +95,6 @@ scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py
 tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py
 ```
 
-Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, a negative volume, and open/close outside low/high.
+Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, and a negative volume.
 
 To add a source, subclass `PriceSource` in `libs/prices/`, export it in `__init__.py`, and add a matching `tests/libs/prices/test_<name>.py`.

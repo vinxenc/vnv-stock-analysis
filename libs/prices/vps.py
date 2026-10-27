@@ -16,13 +16,15 @@ class VPS(PriceSource):
         )
         if not data.get("t"):
             raise PriceNotFoundError(f"no data for {symbol} (unknown ticker?)")
-        return Price(
-            symbol=symbol,
-            source=self.name,
-            date=datetime.fromtimestamp(data["t"][-1], VN_TZ).date(),
-            open=data["o"][-1],
-            high=data["h"][-1],
-            low=data["l"][-1],
-            close=data["c"][-1],
-            volume=data["v"][-1],
+        return Price.model_validate(
+            dict(
+                symbol=symbol,
+                source=self.name,
+                date=datetime.fromtimestamp(data["t"][-1], VN_TZ).date(),
+                open=data["o"][-1],
+                high=data["h"][-1],
+                low=data["l"][-1],
+                close=data["c"][-1],
+                volume=data["v"][-1],
+            )
         )

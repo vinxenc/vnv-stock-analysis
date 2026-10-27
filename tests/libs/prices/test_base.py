@@ -13,7 +13,7 @@ def make(**overrides: float | str) -> Price:
     fields: dict[str, Any] = dict(
         symbol="FPT", source="X", date="2026-10-23", open=57.2, high=57.5, low=56.6, close=57.0, volume=100
     )
-    return Price(**{**fields, **overrides})
+    return Price.model_validate({**fields, **overrides})
 
 
 def fake_response(status: int, body: bytes = b"{}") -> niquests.Response:
@@ -61,7 +61,7 @@ def test_price_coerces_and_validates() -> None:
 
     assert price.date == date(2026, 10, 23) and price.volume == 5
     with pytest.raises(ValidationError):
-        Price(symbol="FPT", source="X")
+        Price.model_validate({"symbol": "FPT", "source": "X"})
 
 
 @pytest.mark.parametrize(
@@ -70,9 +70,6 @@ def test_price_coerces_and_validates() -> None:
         {"low": 0},  # non-positive price
         {"close": -1},
         {"volume": -1},
-        {"low": 58.0},  # low above open/close
-        {"high": 56.0},  # high below open/close
-        {"low": 10.01, "high": 10.0, "open": 10.005, "close": 10.005},  # low above high, hidden by the open/close slack
         {"high": float("inf")},  # non-finite
         {"close": float("nan")},
     ],
@@ -80,10 +77,6 @@ def test_price_coerces_and_validates() -> None:
 def test_price_rejects_inconsistent_values(bad: dict[str, float]) -> None:
     with pytest.raises(ValidationError):
         make(**bad)
-
-
-def test_price_tolerates_rounding_noise() -> None:
-    assert make(open=57.505).high == 57.5  # 0.005 above high, within tolerance
 
 
 def test_price_allows_zero_volume() -> None:

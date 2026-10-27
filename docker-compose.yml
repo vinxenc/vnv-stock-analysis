@@ -1,0 +1,19 @@
+# Local Postgres for development: `docker compose up -d --wait`
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: vnv
+      POSTGRES_PASSWORD: vnv
+      POSTGRES_DB: vnv
+    ports:
+      - "127.0.0.1:5432:5432"  # local only: the credentials are committed
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U vnv"]  # TCP, not the socket-only init server
+      interval: 2s
+      retries: 15
+
+volumes:
+  pgdata:

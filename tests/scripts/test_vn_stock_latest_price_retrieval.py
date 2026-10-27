@@ -23,7 +23,9 @@ class FakeSource(PriceSource):
         outcome = self.outcomes.pop(0) if self.outcomes else None
         if outcome:
             raise outcome
-        return Price(symbol=symbol, source=self.name, date="2026-10-23", open=1, high=2, low=1, close=2, volume=10)
+        return Price.model_validate(
+            dict(symbol=symbol, source=self.name, date="2026-10-23", open=1, high=2, low=1, close=2, volume=10)
+        )
 
 
 @pytest.fixture(autouse=True)

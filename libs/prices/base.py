@@ -1,10 +1,11 @@
 import re
 from abc import ABC, abstractmethod
-from datetime import date, timedelta, timezone
-from typing import Any, Self
+from datetime import timedelta, timezone
+from typing import Any
 
 import niquests
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from libs.db.models import Price
 
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
 VN_TZ = timezone(timedelta(hours=7))
@@ -13,31 +14,6 @@ SYMBOL_RE = re.compile(r"[A-Z0-9]{1,10}")
 
 class PriceNotFoundError(ValueError):
     """The ticker is invalid or the source has no data for it."""
-
-
-class Price(BaseModel):
-    """Latest daily OHLCV of one stock. Prices are in thousand VND."""
-
-    model_config = ConfigDict(allow_inf_nan=False)
-
-    symbol: str
-    source: str
-    unit: str = "thousand VND"
-    date: date
-    open: float = Field(gt=0)
-    high: float = Field(gt=0)
-    low: float = Field(gt=0)
-    close: float = Field(gt=0)
-    volume: int = Field(ge=0)
-
-    @model_validator(mode="after")
-    def check_range(self) -> Self:
-        # 0.01 slack: adjusted prices are rounded per field, so open/close may poke out of low/high by a hair
-        if self.low > self.high or not (
-            self.low - 0.01 <= min(self.open, self.close) and max(self.open, self.close) <= self.high + 0.01
-        ):
-            raise ValueError(f"inconsistent OHLC: {self.open=} {self.high=} {self.low=} {self.close=}")
-        return self
 
 
 class PriceSource(ABC):
