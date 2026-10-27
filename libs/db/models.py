@@ -1,7 +1,6 @@
 import datetime as dt
-from typing import Self
 
-from pydantic import ConfigDict, model_validator
+from pydantic import ConfigDict
 from sqlalchemy import BigInteger
 from sqlmodel import Field, SQLModel
 
@@ -23,15 +22,6 @@ class PriceBase(SQLModel):
     low: float = Field(gt=0)
     close: float = Field(gt=0)
     volume: int = Field(ge=0, sa_type=BigInteger)  # daily volume can pass 2^31
-
-    @model_validator(mode="after")
-    def check_range(self) -> Self:
-        # 0.01 slack: adjusted prices are rounded per field, so open/close may poke out of low/high by a hair
-        if self.low > self.high or not (
-            self.low - 0.01 <= min(self.open, self.close) and max(self.open, self.close) <= self.high + 0.01
-        ):
-            raise ValueError(f"inconsistent OHLC: {self.open=} {self.high=} {self.low=} {self.close=}")
-        return self
 
 
 class Price(PriceBase, table=True):

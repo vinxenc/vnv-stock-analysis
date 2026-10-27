@@ -95,6 +95,6 @@ scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py
 tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py
 ```
 
-Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, a negative volume, and open/close outside low/high.
+Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, and a negative volume.
 
 To add a source, subclass `PriceSource` in `libs/prices/`, export it in `__init__.py`, and add a matching `tests/libs/prices/test_<name>.py`.
