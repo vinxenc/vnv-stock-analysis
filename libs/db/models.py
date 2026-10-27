@@ -2,7 +2,6 @@ import datetime as dt
 from typing import Self
 
 from pydantic import ConfigDict, model_validator
-from sqlalchemy import DateTime, func
 from sqlmodel import Field, SQLModel
 
 
@@ -41,6 +40,3 @@ class Price(PriceBase, table=True):
 
     symbol: str = Field(primary_key=True)
     date: dt.date = Field(primary_key=True)
-    fetched_at: dt.datetime | None = Field(
-        default=None, sa_type=DateTime(timezone=True), sa_column_kwargs={"server_default": func.now()}
-    )

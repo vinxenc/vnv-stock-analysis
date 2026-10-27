@@ -2,7 +2,7 @@
 
 Revision ID: 0001
 Revises: 
-Create Date: 2026-10-27 20:19:53.516781
+Create Date: 2026-10-27 20:23:30.528525
 
 """
 from typing import Sequence, Union
@@ -32,7 +32,6 @@ def upgrade() -> None:
     sa.Column('low', sa.Float(), nullable=False),
     sa.Column('close', sa.Float(), nullable=False),
     sa.Column('volume', sa.Integer(), nullable=False),
-    sa.Column('fetched_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.PrimaryKeyConstraint('symbol', 'date')
     )
     # ### end Alembic commands ###
