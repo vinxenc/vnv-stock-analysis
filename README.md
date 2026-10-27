@@ -12,7 +12,7 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `libs/db/` | `models.py`: `PriceBase` (the validated price, which `libs.prices.Price` reuses) and `Price`, the `prices` table (primary key `symbol` + `date`). |
 | `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. |
 | `docker-compose.yml` | Local Postgres 17 (user, password and database all `vnv`). |
-| `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`. Needs the repo secret `DATABASE_URL`. |
+| `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`. Needs the `DATABASE_URL` secret of the `production` environment. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
 | `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
@@ -41,12 +41,13 @@ After changing `libs/db/models.py`, generate the migration and review it before 
 
 ```bash
 uv run alembic revision --autogenerate -m "what changed"
+uv run alembic upgrade head                                            # apply it to the local database
 uv run alembic check                                                   # fails if models and migrations differ
 ```
 
 `docker compose down -v` throws the local database away. Alembic is a dev dependency, so `uv sync` installs it.
 
-In production the `Migrate-Database` workflow applies the migrations when a PR that touches `migrations/` is merged to `master`. Before the first merge, add the repo secret `DATABASE_URL` (Settings → Secrets and variables → Actions), e.g. `postgresql+psycopg://user:pass@host:5432/db`.
+In production the `Migrate-Database` workflow applies the migrations when a PR that touches `migrations/` is merged to `master`. The job uses the `production` environment, so `DATABASE_URL` must be an environment secret there (Settings → Environments → production), e.g. `postgresql+psycopg://user:pass@host:5432/db`.
 
 ### Commands
 

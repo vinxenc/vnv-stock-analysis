@@ -16,6 +16,7 @@ permissions:
 jobs:
   migrate:
     runs-on: ubuntu-latest
+    environment: production  # DATABASE_URL is an environment secret, limited to master
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
