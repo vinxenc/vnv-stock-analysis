@@ -3,10 +3,13 @@ name = "vnv-stock-analysis"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.20.1",
     "holidays>=0.107",
     "logxide>=0.3.0",
     "niquests>=3.21.2",
+    "psycopg[binary]>=3.3.6",
     "pydantic>=2",
+    "sqlmodel>=0.0.48",
     "tenacity>=9.2.1",
 ]
 

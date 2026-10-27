@@ -4,7 +4,8 @@ from datetime import date, timedelta, timezone
 from typing import Any, Self
 
 import niquests
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import ConfigDict, model_validator
+from sqlmodel import Field, SQLModel
 
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
 VN_TZ = timezone(timedelta(hours=7))
@@ -15,7 +16,7 @@ class PriceNotFoundError(ValueError):
     """The ticker is invalid or the source has no data for it."""
 
 
-class Price(BaseModel):
+class Price(SQLModel):
     """Latest daily OHLCV of one stock. Prices are in thousand VND."""
 
     model_config = ConfigDict(allow_inf_nan=False)
