@@ -2,6 +2,7 @@ import datetime as dt
 from typing import Self
 
 from pydantic import ConfigDict, model_validator
+from sqlalchemy import BigInteger
 from sqlmodel import Field, SQLModel
 
 
@@ -21,7 +22,7 @@ class PriceBase(SQLModel):
     high: float = Field(gt=0)
     low: float = Field(gt=0)
     close: float = Field(gt=0)
-    volume: int = Field(ge=0)
+    volume: int = Field(ge=0, sa_type=BigInteger)  # daily volume can pass 2^31
 
     @model_validator(mode="after")
     def check_range(self) -> Self:
@@ -34,7 +35,7 @@ class PriceBase(SQLModel):
 
 
 class Price(PriceBase, table=True):
-    """One row per stock per day."""
+    """One row per stock per day. Building this class does not validate: check the data with `PriceBase` first."""
 
     __tablename__ = "prices"
 
