@@ -36,7 +36,7 @@ class PriceBase(SQLModel):
 class Price(PriceBase, table=True):
     """One row per stock per day."""
 
-    __tablename__ = "daily_prices"
+    __tablename__ = "prices"
 
     symbol: str = Field(primary_key=True)
     date: dt.date = Field(primary_key=True)
