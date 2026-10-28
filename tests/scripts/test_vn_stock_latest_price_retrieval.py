@@ -133,7 +133,7 @@ def test_main_no_data_writes_nothing(tmp_path: Path) -> None:
     log = FakeLogger()
     assert main(csv_path, out, [FakeSource("A", *[OSError()] * 4)], sleep=lambda _: None, log=log) == NO_DATA
     assert log.records[-1] == ("error", "no price fetched, nothing written")
-    assert NO_DATA == 4  # the workflow's `case 4)` hard-codes this value
+    assert NO_DATA == 4  # documented in the script docstring and README
     assert not out.exists()
 
 

@@ -22,3 +22,11 @@ def test_levels_reach_stderr_and_debug_is_filtered(capfd: pytest.CaptureFixture[
     assert "WARNING w 3" in err
     assert "ERROR e 4" in err
     assert "d 1" not in err
+
+
+def test_logxide_logger_is_exported_lazily() -> None:
+    import libs.logger
+
+    assert libs.logger.LogxideLogger is LogxideLogger
+    with pytest.raises(AttributeError):
+        libs.logger.Missing  # noqa: B018

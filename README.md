@@ -7,16 +7,18 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | Path | What |
 |---|---|
 | `libs/prices/` | `DNSE`, `VPS`, `VNDirect` classes. Each has `get_latest_price(symbol) -> Price`. `Price` is a pydantic model (symbol, source, date, open, high, low, close, volume; thousand VND). |
-| `libs/logger/` | `Logger` interface (`debug/info/warning/error`) and `LogxideLogger`, its adapter over [logxide](https://github.com/Indosaram/logxide). Logs go to stderr. |
+| `libs/logger/` | `Logger` interface (`debug/info/warning/error`), `LogxideLogger` (adapter over [logxide](https://github.com/Indosaram/logxide), logs to stderr) and `GithubActionsLogger` (writes GitHub Actions annotations to stdout). |
 | `scripts/vn_stock_latest_price_retrieval.py` | Fetches the latest price of every symbol in `data/hose_symbols.csv` (DNSE → VPS → VNDirect, 1 retry per source, 1 s between symbols) and writes one JSON array. A symbol that fails everywhere is skipped; exit 4 if none was fetched. |
 | `libs/db/` | `models.py`: `Price`, the `prices` table (primary key `symbol` + `date`), also the model the price sources return (`libs.prices.Price` reuses it). Create it with `Price.model_validate(data)`: SQLModel skips validation in `Price(**data)`. |
+| `scripts/vn_stock_daily_price_store.py` | Reads the JSON above and upserts it into the `prices` table (`ON CONFLICT (symbol, date) DO UPDATE`, one transaction). Needs `$DATABASE_URL`. Exit 4 if the file holds no price. A repeated (symbol, date) in the file: the last row wins. 10 s connect and 60 s statement timeouts. |
 | `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. |
 | `docker-compose.yml` | Local Postgres 17 (user, password and database all `vnv`). |
 | `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`. Needs the `DATABASE_URL` secret of the `production` environment. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
 | `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
-| `.github/workflows/vn-stock-analysis.yml` | `VN-Stock-Analysis`: weekday cron (22:00 Vietnam time). Jobs: `start-analyze` (placeholder) → `is_holiday` → `notification` (level-coloured annotation: warning on a day off, error when no price was fetched) \| `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and prints it for now). |
+| `scripts/pipeline_state.py`, `scripts/notification.py`, `.github/actions/pipeline-state/` | Pipeline state files and the notification that reads them (see below). |
+| `.github/workflows/vn-stock-analysis.yml` | `VN-Stock-Analysis`: weekday cron (22:00 Vietnam time). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
 
 The endpoints are undocumented and may change or block without notice.
 
@@ -53,11 +55,48 @@ In production the `Migrate-Database` workflow applies the migrations on every pu
 
 | Command | What it does |
 |---|---|
-| `uv run pytest` | Unit tests (no network) with coverage on `libs/` and `scripts/`. Fails if coverage is under 95%. |
+| `uv run pytest` | Unit tests (no network, but **needs the local Postgres**, see below) with coverage on `libs/` and `scripts/`. Fails if coverage is under 95%. |
 | `uv run pytest -m live --no-cov` | Live smoke tests against the real endpoints. Not run by default. |
 | `uv run ruff check libs scripts tests` | Lint. Add `--fix` to auto-fix. |
 | `lefthook run pre-commit` | Run the pre-commit checks by hand. |
+| `uv run python -m scripts.vn_stock_daily_price_store [input_json]` | Upsert `out/vn_stock_latest_prices.json` into the database named by `$DATABASE_URL`. |
 | `uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]` | Fetch the latest price of all symbols (default `data/hose_symbols.csv`, takes about 20 min) and write `out/vn_stock_latest_prices.json`. |
+
+### Pipeline state and notification
+
+Every job of `VN-Stock-Analysis` before `notification` ends with the `.github/actions/pipeline-state` composite action. It runs even when the job failed, writes `state/<pipeline>.json` and uploads it as the artifact `pipeline-state-<pipeline>`:
+
+```json
+{"level": "info", "message": "Stored the prices in the database", "pipeline": "vn_stock_daily_price_store"}
+```
+
+| Job result | `level` | `message` |
+|---|---|---|
+| success | `info` (`is_holiday` on a day off: `warning`) | the job's success message |
+| failed | `error` | the job's failure message |
+| cancelled | `warning` | `<pipeline> was cancelled` |
+
+`notification` (`if: always()`) downloads every `pipeline-state-*` artifact into `state/` and runs `python3 -m scripts.notification state` (system Python, no `uv sync`), which logs one annotation per file through `GithubActionsLogger`, titled with the pipeline: `info` → notice, `warning` → warning, `error` → error. A job that was skipped (everything after `is_holiday` on a day off, or after a failed job) writes no file, so it shows nothing. A job whose final result its file does not report is caught by the fallback: the workflow passes `toJSON(needs)` as `$NEEDS`, and a `failure` job is logged as an error unless its state is already `error`, a `cancelled` job as a warning unless its state is already `warning` or `error`. That covers a job that died before writing its file (failed checkout, lost runner) and one that failed or was cancelled after it (a post step such as the uv cache save). A file that cannot be read is logged as an error and the script exits 1. `pipeline_state.py` and `notification.py` use only the standard library (plus `GithubActionsLogger`, which does not import the third-party `logxide`: `libs.logger` loads `LogxideLogger` lazily), so both work even when `uv sync` is the step that failed. To add a pipeline job, end it with the action and name it; `notification` needs the job in its `needs`.
+
+```bash
+python3 scripts/pipeline_state.py state install success info "Dependencies installed" "install failed"   # write one
+python3 -m scripts.notification state                                                                     # log them
+```
+
+### Testing locally
+
+The database tests run against a real Postgres (the one in `docker-compose.yml`), not a fake:
+
+```bash
+docker compose up -d --wait   # start Postgres on 127.0.0.1:5432 (skip if it is already up)
+uv run pytest                 # unit tests + coverage gate
+```
+
+- `tests/conftest.py` creates a separate `vnv_test` database on first use and drops and recreates the tables before every test, so your dev database `vnv` is never touched.
+- No Postgres running: the DB tests fail with "Postgres is not reachable; run `docker compose up -d --wait`".
+- Different server: set `TEST_DATABASE_SERVER` to a `postgresql+psycopg://user:pass@host:port/postgres` URL (a role that can `CREATE DATABASE`).
+- The same applies to the pre-commit hook, which runs `pytest`: start Postgres first.
+- To try the real script against your dev database: `export DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv`, `uv run alembic upgrade head`, then `uv run python -m scripts.vn_stock_daily_price_store`.
 
 The pre-commit hook (`lefthook.yml`) runs the lint, then the unit tests with the coverage gate. A commit is blocked if either fails.
 
@@ -71,7 +110,7 @@ Settings for pytest, coverage and ruff live in `pyproject.toml`.
 |---|---|
 | `install` | `uv sync --locked`, and saves the uv cache (keyed on `uv.lock`) |
 | `lint` | `ruff check libs scripts tests` |
-| `test` | `pytest` with the 95% coverage gate |
+| `test` | `pytest` with the 95% coverage gate, against a Postgres 17 service container (same credentials as `docker-compose.yml`) |
 | `audit` | `pip-audit` on the locked runtime dependencies |
 
 Later jobs restore the cache from `install`, so their own `uv sync --locked` only has to link the packages. Commit `uv.lock` whenever you change dependencies, or `--locked` makes CI fail.
@@ -82,6 +121,7 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 
 - Always add type hints: every function parameter and return type, and class fields (use pydantic models for data that crosses a function boundary). It makes the code easier to read and understand. Ruff's `ANN` rules enforce this, so the lint (and the pre-commit hook) fails on a missing hint.
 - Give variables clear, descriptive names: no single-letter or cryptic names (`r`, `d`, `e`, `p`, `i`). Write `result`, `data`, `error`, `price`, `index` instead.
+- No `print()` anywhere in `libs/` and `scripts/`. Log through the `Logger` interface (`libs/logger`): a library function takes a `Logger` or creates a `LogxideLogger(__name__)`, a script creates one at module level like `scripts/vn_stock_latest_price_retrieval.py`. `LogxideLogger` writes to stderr. To write GitHub Actions annotations use `GithubActionsLogger(title)` (it writes the `::notice::` / `::warning::` / `::error::` commands to stdout, where the runner reads them). Ruff's `T20` rule enforces this in `libs`, `scripts` and `migrations`; only `tests/` is exempt.
 - Use UPPER_CASE only for constants (fixed values such as `NO_DATA`, `UA`, `SYMBOL_RE`). Anything else, like a logger, a client or a session, is lower case. Create it inside a function or as a lower-case variable, not as an upper-case global.
 
 ### Layout
@@ -89,10 +129,11 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 ```
 libs/prices/   base.py (Price, PriceSource, PriceNotFoundError, helpers), dnse.py, vps.py, vndirect.py
 tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
-libs/logger/   base.py (Logger), logxide.py (LogxideLogger)
-tests/libs/logger/   test_logxide.py
-scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py
-tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py
+libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_actions.py (GithubActionsLogger, workflow commands on stdout)
+tests/libs/logger/   test_logxide.py, test_github_actions.py
+scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, pipeline_state.py, notification.py
+tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`)
+tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_pipeline_state.py, test_notification.py
 ```
 
 Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, and a negative volume.

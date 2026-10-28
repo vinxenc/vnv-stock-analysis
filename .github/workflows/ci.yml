@@ -51,6 +51,17 @@ jobs:
     name: Unit tests + coverage
     needs: lint
     runs-on: ubuntu-latest
+    services:
+      postgres:  # same server as docker-compose.yml; tests/conftest.py creates the vnv_test database
+        image: postgres:17
+        env:
+          POSTGRES_USER: vnv
+          POSTGRES_PASSWORD: vnv
+          POSTGRES_DB: vnv
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U vnv" --health-interval 2s --health-retries 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

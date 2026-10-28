@@ -37,4 +37,7 @@ branch = true
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "ANN"]
+select = ["E", "F", "I", "B", "UP", "ANN", "T20"]  # T20: no print(); use the Logger (see README, Code rules)
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["T20"]
