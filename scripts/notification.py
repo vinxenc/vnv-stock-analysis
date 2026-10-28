@@ -4,8 +4,10 @@ Usage: [NEEDS='<toJSON(needs)>'] uv run python -m scripts.notification [state_di
 Reads `*.json` files of {"level": "info"|"warning"|"error", "message": ..., "pipeline": ...} (written by
 scripts/pipeline_state.py) and logs each one through a GithubActionsLogger titled with the pipeline name:
 info -> ::notice, warning -> ::warning, error -> ::error.
-$NEEDS (the workflow's `toJSON(needs)`) is the fallback for a job that died before it could write its file (failed
-checkout, runner lost): a failed job without a state file is logged as an error, a cancelled one as a warning.
+$NEEDS (the workflow's `toJSON(needs)`) is the fallback for a job whose final result its state file does not report:
+it died before writing the file (failed checkout, runner lost) or after it (a post step failed, a late cancel). A
+failed job is logged as an error unless its state is already `error`; a cancelled one as a warning unless its state
+is already `warning` or `error`.
 A file that cannot be read or has an unknown level is logged as an error and makes the exit code 1.
 """
 import json
@@ -16,9 +18,9 @@ from pathlib import Path
 from libs.logger import GithubActionsLogger
 
 LEVELS = ("info", "warning", "error")  # also the Logger method names
-NO_STATE = {  # job result -> (level, what happened)
-    "failure": ("error", "failed before it could write its state, see the job log"),
-    "cancelled": ("warning", "was cancelled before it could write its state"),
+FALLBACK = {  # job result -> (level to log, recorded levels that already report it, what happened)
+    "failure": ("error", {"error"}, "failed without reporting it, see the job log"),
+    "cancelled": ("warning", {"warning", "error"}, "was cancelled without reporting it"),
 }
 
 
@@ -33,18 +35,20 @@ def main(directory: Path = Path("state"), needs_json: str = "{}") -> int:
     if not paths:
         log("notification", "warning", f"no pipeline state found in {directory}")
     failed = False
+    recorded: dict[str, str] = {}  # job -> level its state file reports
     for path in paths:
         try:
             state = json.loads(path.read_text(encoding="utf-8"))
             log(str(state["pipeline"]), state["level"], str(state["message"]))
+            recorded[path.stem] = state["level"]
         except (OSError, ValueError, KeyError, TypeError) as error:
             failed = True
             log(path.name, "error", f"unreadable pipeline state: {type(error).__name__}: {error}")
-    reported = {path.stem for path in paths}
     for job, need in json.loads(needs_json).items():
-        if job not in reported and need["result"] in NO_STATE:
-            level, what = NO_STATE[need["result"]]
-            log(job, level, f"{job} {what}")
+        if need["result"] in FALLBACK:
+            level, covered_by, what = FALLBACK[need["result"]]
+            if recorded.get(job) not in covered_by:
+                log(job, level, f"{job} {what}")
     return 1 if failed else 0
 
 

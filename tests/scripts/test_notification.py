@@ -50,16 +50,33 @@ def test_unreadable_state_is_an_error_and_exit_1(
     assert "::notice title=good::fine" in out  # one bad file does not hide the others
 
 
-def test_job_without_state_falls_back_to_its_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    write_state(tmp_path, "install", "info", "ok")
-    results = {"install": "failure", "checkout": "failure", "hung": "cancelled", "later": "skipped"}
+def test_job_result_not_reported_by_its_state_falls_back(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    write_state(tmp_path, "post_failed", "info", "ok")  # success recorded, then a post step failed
+    write_state(tmp_path, "late_cancel", "info", "ok")
+    write_state(tmp_path, "reported_error", "error", "bad")
+    write_state(tmp_path, "reported_cancel", "warning", "meh")
+    results = {
+        "post_failed": "failure",
+        "late_cancel": "cancelled",
+        "reported_error": "failure",
+        "reported_cancel": "cancelled",
+        "no_file": "failure",
+        "no_file_cancel": "cancelled",
+        "later": "skipped",
+        "fine": "success",
+    }
     needs = {name: {"result": result, "outputs": {}} for name, result in results.items()}
     assert main(tmp_path, json.dumps(needs)) == 0
     assert capsys.readouterr().out.splitlines() == [
-        "::notice title=install::ok",  # its own state wins over the job result
-        "::error title=checkout::checkout failed before it could write its state, see the job log",
-        "::warning title=hung::hung was cancelled before it could write its state",
-    ]  # a skipped job says nothing
+        "::notice title=late_cancel::ok",
+        "::notice title=post_failed::ok",
+        "::warning title=reported_cancel::meh",
+        "::error title=reported_error::bad",
+        "::error title=post_failed::post_failed failed without reporting it, see the job log",
+        "::warning title=late_cancel::late_cancel was cancelled without reporting it",
+        "::error title=no_file::no_file failed without reporting it, see the job log",
+        "::warning title=no_file_cancel::no_file_cancel was cancelled without reporting it",
+    ]  # reported_* are not repeated, a skipped or successful job says nothing
 
 
 def test_run_as_script(tmp_path: Path) -> None:
@@ -71,4 +88,4 @@ def test_run_as_script(tmp_path: Path) -> None:
     )  # fmt: skip
     assert result.returncode == 0
     assert result.stdout.splitlines()[0] == "::notice title=install::ok"
-    assert result.stdout.splitlines()[1].startswith("::error title=checkout::checkout failed")
+    assert result.stdout.splitlines()[1].startswith("::error title=checkout::checkout failed without")
