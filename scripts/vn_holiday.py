@@ -13,15 +13,15 @@ VN_TZ = timezone(timedelta(hours=7))
 WORKING_DAY = 3  # not 1: Python exits 1 on an uncaught error, which must not read as "working day"
 
 
-def off_reason(d: date) -> str | None:
-    """Why `d` is a day off in Vietnam, or None for a working day."""
-    if d.weekday() >= 5:
+def off_reason(day: date) -> str | None:
+    """Why `day` is a day off in Vietnam, or None for a working day."""
+    if day.weekday() >= 5:
         return "weekend"
-    return holidays.VN(years=d.year).get(d)
+    return holidays.VN(years=day.year).get(day)
 
 
 if __name__ == "__main__":
-    d = date.fromisoformat(sys.argv[1]) if len(sys.argv) > 1 else datetime.now(VN_TZ).date()
-    reason = off_reason(d)
-    print(f"{d} {d:%a}: " + (f"day off ({reason})" if reason else "working day"))
+    day = date.fromisoformat(sys.argv[1]) if len(sys.argv) > 1 else datetime.now(VN_TZ).date()
+    reason = off_reason(day)
+    print(f"{day} {day:%a}: " + (f"day off ({reason})" if reason else "working day"))
     sys.exit(0 if reason else WORKING_DAY)

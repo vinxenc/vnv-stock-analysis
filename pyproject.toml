@@ -37,4 +37,10 @@ branch = true
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP", "ANN"]
+select = ["E", "F", "I", "B", "UP", "ANN", "T20"]  # T20: no print(); use the Logger (see README, Code rules)
+
+[tool.ruff.lint.per-file-ignores]
+# stdout IS the output of these two: the workflow reads the status line / the `::notice::` commands
+"scripts/vn_holiday.py" = ["T201"]
+"scripts/notification.py" = ["T201"]
+"tests/**" = ["T20"]

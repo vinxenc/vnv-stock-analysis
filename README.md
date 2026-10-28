@@ -76,7 +76,7 @@ Every job of `VN-Stock-Analysis` before `notification` ends with the `.github/ac
 | failed | `error` | the job's failure message |
 | cancelled | `warning` | `<pipeline> was cancelled` |
 
-`notification` (`if: always()`) downloads every `pipeline-state-*` artifact into `state/` and runs `python3 scripts/notification.py state`, which prints one annotation per file, titled with the pipeline: `info` → notice, `warning` → warning, `error` → error. A job that was skipped (everything after `is_holiday` on a day off, or after a failed job) writes no file, so it shows nothing. A file that cannot be read is logged as an error and the script exits 1. Both scripts use only the standard library, so they work even when `uv sync` is the step that failed. To add a pipeline job, end it with the action and name it; `notification` needs the job in its `needs`.
+`notification` (`if: always()`) downloads every `pipeline-state-*` artifact into `state/` and runs `python3 scripts/notification.py state`, which prints one annotation per file, titled with the pipeline: `info` → notice, `warning` → warning, `error` → error. A job that was skipped (everything after `is_holiday` on a day off, or after a failed job) writes no file, so it shows nothing. A job that died before it could write its file (failed checkout, lost runner) is caught by the fallback: the workflow passes `toJSON(needs)` as `$NEEDS`, and a `failure` (error) or `cancelled` (warning) job without a state file is logged from its job result. A file that cannot be read is logged as an error and the script exits 1. Both scripts use only the standard library, so they work even when `uv sync` is the step that failed. To add a pipeline job, end it with the action and name it; `notification` needs the job in its `needs`.
 
 ```bash
 python3 scripts/pipeline_state.py state install success info "Dependencies installed" "install failed"   # write one
@@ -121,6 +121,7 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 
 - Always add type hints: every function parameter and return type, and class fields (use pydantic models for data that crosses a function boundary). It makes the code easier to read and understand. Ruff's `ANN` rules enforce this, so the lint (and the pre-commit hook) fails on a missing hint.
 - Give variables clear, descriptive names: no single-letter or cryptic names (`r`, `d`, `e`, `p`, `i`). Write `result`, `data`, `error`, `price`, `index` instead.
+- No `print()` in `libs/` (and in `scripts/`, except where stdout is the output). Log through the `Logger` interface (`libs/logger`): a library function takes a `Logger` or creates a `LogxideLogger(__name__)`, a script creates one at module level like `scripts/vn_stock_latest_price_retrieval.py`. Logs go to stderr, so stdout stays free for real output. Ruff's `T20` rule enforces this; the only exceptions are `scripts/vn_holiday.py` (its status line) and `scripts/notification.py` (GitHub Actions `::notice::` commands must go to stdout), listed in `pyproject.toml`.
 - Use UPPER_CASE only for constants (fixed values such as `NO_DATA`, `UA`, `SYMBOL_RE`). Anything else, like a logger, a client or a session, is lower case. Create it inside a function or as a lower-case variable, not as an upper-case global.
 
 ### Layout
