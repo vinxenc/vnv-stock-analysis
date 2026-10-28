@@ -10,14 +10,15 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `libs/logger/` | `Logger` interface (`debug/info/warning/error`) and `LogxideLogger`, its adapter over [logxide](https://github.com/Indosaram/logxide). Logs go to stderr. |
 | `scripts/vn_stock_latest_price_retrieval.py` | Fetches the latest price of every symbol in `data/hose_symbols.csv` (DNSE → VPS → VNDirect, 1 retry per source, 1 s between symbols) and writes one JSON array. A symbol that fails everywhere is skipped; exit 4 if none was fetched. |
 | `libs/db/` | `models.py`: `Price`, the `prices` table (primary key `symbol` + `date`), also the model the price sources return (`libs.prices.Price` reuses it). Create it with `Price.model_validate(data)`: SQLModel skips validation in `Price(**data)`. |
-| `scripts/vn_stock_daily_price_store.py` | Reads the JSON above and upserts it into the `prices` table (`ON CONFLICT (symbol, date) DO UPDATE`, one transaction). Needs `$DATABASE_URL`. Exit 4 if the file holds no price. |
+| `scripts/vn_stock_daily_price_store.py` | Reads the JSON above and upserts it into the `prices` table (`ON CONFLICT (symbol, date) DO UPDATE`, one transaction). Needs `$DATABASE_URL`. Exit 4 if the file holds no price. A repeated (symbol, date) in the file: the last row wins. 10 s connect and 60 s statement timeouts. |
 | `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. |
 | `docker-compose.yml` | Local Postgres 17 (user, password and database all `vnv`). |
 | `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`. Needs the `DATABASE_URL` secret of the `production` environment. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
 | `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
-| `.github/workflows/vn-stock-analysis.yml` | `VN-Stock-Analysis`: weekday cron (22:00 Vietnam time). Jobs: `start-analyze` (placeholder) → `is_holiday` → `notification` (level-coloured annotation: warning on a day off, error when no price was fetched) \| `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret). |
+| `scripts/pipeline_state.py`, `scripts/notification.py`, `.github/actions/pipeline-state/` | Pipeline state files and the notification that reads them (see below). |
+| `.github/workflows/vn-stock-analysis.yml` | `VN-Stock-Analysis`: weekday cron (22:00 Vietnam time). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
 
 The endpoints are undocumented and may change or block without notice.
 
@@ -60,6 +61,27 @@ In production the `Migrate-Database` workflow applies the migrations on every pu
 | `lefthook run pre-commit` | Run the pre-commit checks by hand. |
 | `uv run python -m scripts.vn_stock_daily_price_store [input_json]` | Upsert `out/vn_stock_latest_prices.json` into the database named by `$DATABASE_URL`. |
 | `uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]` | Fetch the latest price of all symbols (default `data/hose_symbols.csv`, takes about 20 min) and write `out/vn_stock_latest_prices.json`. |
+
+### Pipeline state and notification
+
+Every job of `VN-Stock-Analysis` before `notification` ends with the `.github/actions/pipeline-state` composite action. It runs even when the job failed, writes `state/<pipeline>.json` and uploads it as the artifact `pipeline-state-<pipeline>`:
+
+```json
+{"level": "info", "message": "Stored the prices in the database", "pipeline": "vn_stock_daily_price_store"}
+```
+
+| Job result | `level` | `message` |
+|---|---|---|
+| success | `info` (`is_holiday` on a day off: `warning`) | the job's success message |
+| failed | `error` | the job's failure message |
+| cancelled | `warning` | `<pipeline> was cancelled` |
+
+`notification` (`if: always()`) downloads every `pipeline-state-*` artifact into `state/` and runs `python3 scripts/notification.py state`, which prints one annotation per file, titled with the pipeline: `info` → notice, `warning` → warning, `error` → error. A job that was skipped (everything after `is_holiday` on a day off, or after a failed job) writes no file, so it shows nothing. A file that cannot be read is logged as an error and the script exits 1. Both scripts use only the standard library, so they work even when `uv sync` is the step that failed. To add a pipeline job, end it with the action and name it; `notification` needs the job in its `needs`.
+
+```bash
+python3 scripts/pipeline_state.py state install success info "Dependencies installed" "install failed"   # write one
+python3 scripts/notification.py state                                                                    # log them
+```
 
 ### Testing locally
 
@@ -108,9 +130,9 @@ libs/prices/   base.py (Price, PriceSource, PriceNotFoundError, helpers), dnse.p
 tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
 libs/logger/   base.py (Logger), logxide.py (LogxideLogger)
 tests/libs/logger/   test_logxide.py
-scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py
+scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, pipeline_state.py, notification.py
 tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`)
-tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py
+tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_pipeline_state.py, test_notification.py
 ```
 
 Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, and a negative volume.

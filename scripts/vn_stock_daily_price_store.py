@@ -22,8 +22,17 @@ logger = LogxideLogger("vn_stock_daily_price_store")
 
 
 def read_prices(path: Path) -> list[Price]:
-    """Validate every row: one bad row fails the whole load before anything is written."""
-    return [Price.model_validate(row) for row in json.loads(path.read_text(encoding="utf-8"))]
+    """Validate every row: one bad row fails the whole load before anything is written.
+
+    Two rows with the same (symbol, date) would make Postgres reject the whole upsert: the last one wins.
+    """
+    prices = (Price.model_validate(row) for row in json.loads(path.read_text(encoding="utf-8")))
+    return list({(price.symbol, price.date): price for price in prices}.values())
+
+
+def connect() -> Engine:
+    """Engine for $DATABASE_URL that gives up instead of hanging on a dead host (10 s) or a held lock (60 s)."""
+    return create_engine(database_url(), connect_args={"connect_timeout": 10, "options": "-c statement_timeout=60000"})
 
 
 def store(prices: list[Price], engine: Engine) -> None:
@@ -42,7 +51,7 @@ def main(
     if not prices:
         log.error("%s holds no price, nothing stored", input_json)
         return NO_DATA
-    store(prices, engine or create_engine(database_url()))
+    store(prices, engine or connect())
     log.info("stored %d prices", len(prices))
     return 0
 

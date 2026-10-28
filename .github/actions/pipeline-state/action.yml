@@ -1,0 +1,40 @@
+name: Pipeline state
+description: >-
+  Write this job's result as state/<pipeline>.json ({level, message, pipeline}) and upload it for the notification job.
+  Call it as the last step of a job, with `if: always()` and the job.status context as job-status.
+inputs:
+  pipeline:
+    description: Pipeline (job) name, also the file name
+    required: true
+  job-status:
+    description: The calling job's job.status
+    required: true
+  success-message:
+    description: Message when the job succeeded
+    required: true
+  failure-message:
+    description: Message when the job failed (level error)
+    required: true
+  success-level:
+    description: Level when the job succeeded (info, warning or error)
+    default: info
+runs:
+  using: composite
+  steps:
+    - name: Write state
+      if: always()  # the calling job may already have failed
+      shell: bash
+      env:  # through env, not inline: a message may come from a step output
+        PIPELINE: ${{ inputs.pipeline }}
+        JOB_STATUS: ${{ inputs.job-status }}
+        SUCCESS_LEVEL: ${{ inputs.success-level }}
+        SUCCESS_MESSAGE: ${{ inputs.success-message }}
+        FAILURE_MESSAGE: ${{ inputs.failure-message }}
+      # system python3, not uv: the job may have failed on `uv sync`
+      run: python3 scripts/pipeline_state.py state "$PIPELINE" "$JOB_STATUS" "$SUCCESS_LEVEL" "$SUCCESS_MESSAGE" "$FAILURE_MESSAGE"
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      if: always()
+      with:
+        name: pipeline-state-${{ inputs.pipeline }}
+        path: state/${{ inputs.pipeline }}.json
+        retention-days: 7
