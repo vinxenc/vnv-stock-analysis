@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.notification import annotation, main
+from scripts.notification import main
 
 
 def write_state(directory: Path, pipeline: str, level: str, message: str) -> None:
@@ -27,8 +27,10 @@ def test_each_level_becomes_its_annotation(tmp_path: Path, capsys: pytest.Captur
     ]
 
 
-def test_special_characters_are_escaped() -> None:
-    assert annotation("notice", "a:b,c", "50%\nnext") == "::notice title=a%3Ab%2Cc::50%25%0Anext"
+def test_message_with_percent_is_logged_literally(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    write_state(tmp_path, "a:b", "info", "100% done\nnext")
+    assert main(tmp_path) == 0
+    assert capsys.readouterr().out == "::notice title=a%3Ab::100%25 done%0Anext\n"
 
 
 def test_no_state_files_warns(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -64,7 +66,7 @@ def test_run_as_script(tmp_path: Path) -> None:
     write_state(tmp_path, "install", "info", "ok")
     env = {**os.environ, "NEEDS": '{"checkout": {"result": "failure"}}'}
     result = subprocess.run(
-        [sys.executable, "scripts/notification.py", str(tmp_path)],
+        [sys.executable, "-m", "scripts.notification", str(tmp_path)],
         capture_output=True, text=True, cwd=Path(__file__).parents[2], env=env,
     )  # fmt: skip
     assert result.returncode == 0
