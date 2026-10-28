@@ -113,12 +113,28 @@ jobs:
     name: vn stock daily price store
     needs: retrieve_prices
     runs-on: ubuntu-latest
+    environment: production  # DATABASE_URL is an environment secret, limited to master
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false
+          prune-cache: false  # part of the cache key: must match the install job to hit its cache
+          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
+      - name: Install dependencies (from cache)
+        run: uv sync --locked --no-dev
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: vn-stock-latest-prices
           path: out
-      - run: cat out/vn_stock_latest_prices.json
+      - name: Store prices (upsert)
+        run: uv run --no-sync python -m scripts.vn_stock_daily_price_store
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
   notification:
     needs: [is_holiday, retrieve_prices]
