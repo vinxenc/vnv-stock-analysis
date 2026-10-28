@@ -1,6 +1,6 @@
 """Log every pipeline state file as a coloured GitHub Actions annotation.
 
-Usage: [NEEDS='<toJSON(needs)>'] uv run python -m scripts.notification [state_directory]      (default: state)
+Usage: [NEEDS='<toJSON(needs)>'] python3 -m scripts.notification [state_directory]      (default: state)
 Reads `*.json` files of {"level": "info"|"warning"|"error", "message": ..., "pipeline": ...} (written by
 scripts/pipeline_state.py) and logs each one through a GithubActionsLogger titled with the pipeline name:
 info -> ::notice, warning -> ::warning, error -> ::error.
@@ -8,6 +8,7 @@ $NEEDS (the workflow's `toJSON(needs)`) is the fallback for a job whose final re
 it died before writing the file (failed checkout, runner lost) or after it (a post step failed, a late cancel). A
 failed job is logged as an error unless its state is already `error`; a cancelled one as a warning unless its state
 is already `warning` or `error`.
+Standard library plus libs.logger.GithubActionsLogger only: it must run even when `uv sync` failed.
 A file that cannot be read or has an unknown level is logged as an error and makes the exit code 1.
 """
 import json

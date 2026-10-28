@@ -1,4 +1,7 @@
 import io
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -35,3 +38,10 @@ def test_percent_without_args_is_literal_and_special_characters_are_escaped() ->
 def test_escape_only_escapes_properties_more() -> None:
     assert escape("a:b,c\r") == "a:b,c%0D"
     assert escape("a:b,c\r", prop=True) == "a%3Ab%2Cc%0D"
+
+
+def test_package_and_notification_import_without_logxide() -> None:
+    """The notification job runs on system Python after a failed `uv sync`: logxide may be missing."""
+    code = "import sys; sys.modules['logxide'] = None; import scripts.notification; from libs.logger import Logger"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=Path(__file__).parents[3])
+    assert result.returncode == 0, result.stderr
