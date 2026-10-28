@@ -175,4 +175,6 @@ jobs:
           merge-multiple: true
           path: state
       - name: Log every pipeline state as an annotation
+        env:
+          NEEDS: ${{ toJSON(needs) }}  # fallback for a job that died before it could write its state
         run: python3 scripts/notification.py state

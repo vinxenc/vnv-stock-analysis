@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -47,10 +48,25 @@ def test_unreadable_state_is_an_error_and_exit_1(
     assert "::notice title=good::fine" in out  # one bad file does not hide the others
 
 
+def test_job_without_state_falls_back_to_its_result(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    write_state(tmp_path, "install", "info", "ok")
+    results = {"install": "failure", "checkout": "failure", "hung": "cancelled", "later": "skipped"}
+    needs = {name: {"result": result, "outputs": {}} for name, result in results.items()}
+    assert main(tmp_path, json.dumps(needs)) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "::notice title=install::ok",  # its own state wins over the job result
+        "::error title=checkout::checkout failed before it could write its state, see the job log",
+        "::warning title=hung::hung was cancelled before it could write its state",
+    ]  # a skipped job says nothing
+
+
 def test_run_as_script(tmp_path: Path) -> None:
     write_state(tmp_path, "install", "info", "ok")
+    env = {**os.environ, "NEEDS": '{"checkout": {"result": "failure"}}'}
     result = subprocess.run(
         [sys.executable, "scripts/notification.py", str(tmp_path)],
-        capture_output=True, text=True, cwd=Path(__file__).parents[2],
+        capture_output=True, text=True, cwd=Path(__file__).parents[2], env=env,
     )  # fmt: skip
-    assert (result.returncode, result.stdout) == (0, "::notice title=install::ok\n")
+    assert result.returncode == 0
+    assert result.stdout.splitlines()[0] == "::notice title=install::ok"
+    assert result.stdout.splitlines()[1].startswith("::error title=checkout::checkout failed")
