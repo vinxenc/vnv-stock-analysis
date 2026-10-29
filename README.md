@@ -124,7 +124,7 @@ uv run pytest
 |---|---|
 | `install` | `uv sync --locked`, and saves the uv cache (keyed on `uv.lock`) |
 | `lint` | `ruff check libs scripts tests` |
-| `test` | `pytest` with the 95% coverage gate, against a Postgres 17 service container (same credentials as `docker-compose.yml`) |
+| `test` | Migrates and seeds the Postgres 17 service container (same credentials as `docker-compose.yml`) with `tests/data/prices_hpg_aam.json`, then `pytest` with the 95% coverage gate |
 | `audit` | `pip-audit` on the locked runtime dependencies |
 
 Later jobs restore the cache from `install`, so their own `uv sync --locked` only has to link the packages. Commit `uv.lock` whenever you change dependencies, or `--locked` makes CI fail.
