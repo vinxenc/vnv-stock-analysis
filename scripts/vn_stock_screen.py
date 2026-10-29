@@ -64,10 +64,10 @@ def main(
     today: dt.date | None = None,
     log: Logger = logger,
 ) -> int:
+    output_csv.unlink(missing_ok=True)  # an older shortlist must not pass for today's, whatever happens next
     liquid = screen(engine or connect(), today or dt.datetime.now(VN_TZ).date(), log)
     if not liquid:
         log.error("no symbol reaches the turnover threshold, nothing written")
-        output_csv.unlink(missing_ok=True)  # an older shortlist must not pass for today's
         return NO_DATA
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with output_csv.open("w", encoding="utf-8", newline="") as file:

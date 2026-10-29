@@ -112,6 +112,15 @@ def test_main_removes_an_old_shortlist_when_nobody_is_liquid(tmp_path: Path, eng
     assert not path.exists()
 
 
+def test_main_removes_an_old_shortlist_when_the_session_is_stale(tmp_path: Path, engine: Engine) -> None:
+    path = tmp_path / "liquid_symbols.csv"
+    path.write_text("code\nOLD\n", encoding="utf-8")
+    store(engine, ("AAA", 10, 3_000_000, YESTERDAY))
+    with pytest.raises(RuntimeError, match="late or failed"):
+        main(path, engine, TODAY)
+    assert not path.exists()
+
+
 def test_main_defaults_to_today_in_vietnam(tmp_path: Path, engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeDatetime(dt.datetime):
         @classmethod
