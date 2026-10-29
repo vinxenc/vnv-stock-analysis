@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine
 from sqlmodel import Session, select
 
 from libs.db.models import Price
-from scripts.vn_stock_daily_price_store import NO_DATA, connect, main, read_prices
+from scripts.vn_stock_daily_price_store import NO_DATA, main, read_prices
 
 
 def row(symbol: str, close: float = 2.0, date: str = "2026-10-23", source: str = "A") -> dict[str, object]:
@@ -41,14 +41,6 @@ def test_read_prices_dedupes_same_symbol_and_date_last_wins(tmp_path: Path, engi
     assert [(price.symbol, price.close) for price in read_prices(path)] == [("AAA", 7.0), ("BBB", 2.0)]
     assert main(path, engine) == 0  # a duplicate key would make Postgres reject the whole statement
     assert [(price.symbol, price.close) for price in stored(engine)] == [("AAA", 7.0), ("BBB", 2.0)]
-
-
-def test_connect_sets_timeouts(monkeypatch: pytest.MonkeyPatch, pg_url: str) -> None:
-    monkeypatch.setenv("DATABASE_URL", pg_url)
-    engine = connect()
-    with engine.connect() as connection:
-        assert connection.execute(text("SHOW statement_timeout")).scalar() == "1min"
-    engine.dispose()
 
 
 def test_main_inserts_rows(tmp_path: Path, engine: Engine) -> None:

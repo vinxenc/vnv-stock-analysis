@@ -90,8 +90,47 @@ jobs:
           failure-message: Pipeline failed, can not check the holiday
           success-level: ${{ steps.check.outputs.holiday == 'true' && 'warning' || 'info' }}
 
+  vn_stock_screen:
+    name: vn stock screen
+    needs: is_holiday
+    if: needs.is_holiday.outputs.holiday == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # the script has its own database timeouts; this is the backstop
+    environment: production  # DATABASE_URL is an environment secret, limited to master
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false
+          prune-cache: false  # part of the cache key: must match the install job to hit its cache
+          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
+      - name: Install dependencies (from cache)
+        run: uv sync --locked --no-dev
+      - name: Screen the liquid symbols
+        # exits 0 with a CSV, 4 when nobody is liquid enough; a stale session crashes; any non-zero code fails the job
+        run: uv run --no-sync python -m scripts.vn_stock_screen
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: vn-stock-screen
+          path: out/liquid_symbols.csv
+          retention-days: 7
+          if-no-files-found: error
+      - if: always()
+        uses: ./.github/actions/pipeline-state
+        with:
+          pipeline: vn_stock_screen
+          job-status: ${{ job.status }}
+          success-message: Screened the liquid symbols
+          failure-message: Pipeline failed, can not screen the liquid symbols (stale prices or none liquid)
+
   notification:
-    needs: [start-analyze, install, is_holiday]  # each job added to this workflow goes here too
+    needs: [start-analyze, install, is_holiday, vn_stock_screen]  # each job added to this workflow goes here too
     if: always()  # also after a failed or skipped job: it only reads the state files they wrote
     runs-on: ubuntu-latest
     steps:

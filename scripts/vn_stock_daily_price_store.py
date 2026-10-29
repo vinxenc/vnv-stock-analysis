@@ -11,9 +11,8 @@ from pathlib import Path
 
 from sqlalchemy import Engine
 from sqlalchemy.dialects.postgresql import insert
-from sqlmodel import create_engine
 
-from libs.db import database_url
+from libs.db import connect
 from libs.db.models import Price
 from libs.logger import Logger, LogxideLogger
 
@@ -28,11 +27,6 @@ def read_prices(path: Path) -> list[Price]:
     """
     prices = (Price.model_validate(row) for row in json.loads(path.read_text(encoding="utf-8")))
     return list({(price.symbol, price.date): price for price in prices}.values())
-
-
-def connect() -> Engine:
-    """Engine for $DATABASE_URL that gives up instead of hanging on a dead host (10 s) or a held lock (60 s)."""
-    return create_engine(database_url(), connect_args={"connect_timeout": 10, "options": "-c statement_timeout=60000"})
 
 
 def store(prices: list[Price], engine: Engine) -> None:
