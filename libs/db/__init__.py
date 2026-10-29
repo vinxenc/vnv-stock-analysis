@@ -19,8 +19,8 @@ def connect() -> Engine:
 
 
 def log_sql(engine: Engine) -> Engine:
-    """With SQL_ECHO=1, log every statement and its parameters. Not SQLAlchemy's `echo=True`: logxide swallows it."""
-    if os.environ.get("SQL_ECHO") == "1":
+    """With SQL_LOG_ENABLE=1, log every statement and its parameters (not `echo=True`: logxide swallows it)."""
+    if os.environ.get("SQL_LOG_ENABLE") == "1":
         logger = LogxideLogger("sql")
         event.listen(
             engine,

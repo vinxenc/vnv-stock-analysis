@@ -22,11 +22,11 @@ def test_connect_sets_timeouts(monkeypatch: pytest.MonkeyPatch, pg_url: str) -> 
 def test_log_sql_logs_statements_only_when_asked(
     monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], engine: Engine
 ) -> None:
-    monkeypatch.delenv("SQL_ECHO", raising=False)
+    monkeypatch.delenv("SQL_LOG_ENABLE", raising=False)
     with log_sql(engine).connect() as connection:
         connection.execute(text("SELECT 11111"))
     assert "11111" not in capfd.readouterr().err
-    monkeypatch.setenv("SQL_ECHO", "1")
+    monkeypatch.setenv("SQL_LOG_ENABLE", "1")
     with log_sql(engine).connect() as connection:
         connection.execute(text("SELECT :value"), {"value": 22222})
     assert "22222" in capfd.readouterr().err  # the parameter, so statement and parameters are both logged
