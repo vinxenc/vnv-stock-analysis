@@ -105,6 +105,10 @@ The pre-commit hook (`lefthook.yml`) runs the lint, then the unit tests with the
 
 Settings for pytest, coverage and ruff live in `pyproject.toml`.
 
+#### See the SQL
+
+Set `SQL_ECHO=1` to log every SQL statement with its parameters (through the project's logger, to stderr). It works for all three: `SQL_ECHO=1 uv run alembic upgrade head`, `SQL_ECHO=1 uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json` and `SQL_ECHO=1 uv run pytest -s` (`-s`, or `-rP` on a passing test, because pytest hides the output otherwise). SQLAlchemy's own `echo=True` is not used: logxide swallows it. A new engine must be wrapped with `libs.db.log_sql`; `connect()` already is.
+
 #### Seed the database
 
 `tests/data/prices_hpg_aam.json` holds real history of two stocks (HPG, very liquid; AAM, almost untraded). CI migrates and seeds the job's Postgres service with it before `pytest`, and `test_screen_on_the_seeded_database` checks the screen against that data. The same locally (that test is skipped while `$DATABASE_URL` is unset):

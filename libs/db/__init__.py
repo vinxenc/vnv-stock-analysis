@@ -1,8 +1,10 @@
 import os
 import re
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, event
 from sqlmodel import create_engine
+
+from libs.logger import LogxideLogger
 
 
 def database_url() -> str:
@@ -12,4 +14,19 @@ def database_url() -> str:
 
 def connect() -> Engine:
     """Engine for $DATABASE_URL that gives up instead of hanging on a dead host (10 s) or a held lock (60 s)."""
-    return create_engine(database_url(), connect_args={"connect_timeout": 10, "options": "-c statement_timeout=60000"})
+    options = {"connect_timeout": 10, "options": "-c statement_timeout=60000"}
+    return log_sql(create_engine(database_url(), connect_args=options))
+
+
+def log_sql(engine: Engine) -> Engine:
+    """With SQL_ECHO=1, log every statement and its parameters. Not SQLAlchemy's `echo=True`: logxide swallows it."""
+    if os.environ.get("SQL_ECHO") == "1":
+        logger = LogxideLogger("sql")
+        event.listen(
+            engine,
+            "before_cursor_execute",
+            lambda connection, cursor, statement, parameters, context, executemany: logger.info(
+                "%s %s", " ".join(statement.split()), parameters
+            ),
+        )
+    return engine
