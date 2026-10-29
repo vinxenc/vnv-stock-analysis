@@ -11,6 +11,7 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `scripts/vn_stock_latest_price_retrieval.py` | Fetches the latest price of every symbol in `data/hose_symbols.csv` (DNSE → VPS → VNDirect, 1 retry per source, 1 s between symbols) and writes one JSON array. A symbol that fails everywhere is skipped; exit 4 if none was fetched. |
 | `libs/db/` | `models.py`: `Price`, the `prices` table (primary key `symbol` + `date`), also the model the price sources return (`libs.prices.Price` reuses it). Create it with `Price.model_validate(data)`: SQLModel skips validation in `Price(**data)`. |
 | `scripts/vn_stock_daily_price_store.py` | Reads the JSON above and upserts it into the `prices` table (`ON CONFLICT (symbol, date) DO UPDATE`, one transaction). Needs `$DATABASE_URL`. Exit 4 if the file holds no price. A repeated (symbol, date) in the file: the last row wins. 10 s connect and 60 s statement timeouts. |
+| `scripts/vn_stock_screen.py` | Reads `prices` and writes `out/liquid_symbols.csv` (a `code` column): the symbols that traded today (Vietnam time) and whose average turnover (`close × volume`) over their last 20 sessions is at least 20 billion VND (a symbol with fewer rows is averaged over the rows it has). Needs `$DATABASE_URL`. Crashes (exit 1) when the newest session in `prices` is not today, so a late or failed sync is never reported as fresh data; exit 4 if nobody is liquid enough. |
 | `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. |
 | `docker-compose.yml` | Local Postgres 17 (user, password and database all `vnv`). |
 | `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`. Needs the `DATABASE_URL` secret of the `production` environment. |
@@ -19,7 +20,7 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
 | `scripts/pipeline_state.py`, `scripts/notification.py`, `.github/actions/pipeline-state/` | Pipeline state files and the notification that reads them (see below). |
 | `.github/workflows/vn-stock-prices-sync.yml` | `VN Stock Prices Sync`: weekday cron (20:00 Vietnam time). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
-| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (22:00 Vietnam time) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync` two hours earlier), never fetches. Jobs so far: `start-analyze` → `install` → `is_holiday` (a day off skips the later jobs), then `notification`. The screen, history and analyze jobs are planned in `docs/plans/phase-1-sql-screens.md`. |
+| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (22:00 Vietnam time) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync` two hours earlier), never fetches. Jobs so far: `start-analyze` → `install` → `is_holiday` (a day off skips the later jobs) → `vn_stock_screen` (uploads the `vn-stock-screen` artifact, with the `production` environment's `DATABASE_URL` secret), then `notification`. The history and analyze jobs are planned in `docs/plans/phase-1-sql-screens.md`. |
 
 The endpoints are undocumented and may change or block without notice.
 
@@ -61,6 +62,7 @@ In production the `Migrate-Database` workflow applies the migrations on every pu
 | `uv run ruff check libs scripts tests` | Lint. Add `--fix` to auto-fix. |
 | `lefthook run pre-commit` | Run the pre-commit checks by hand. |
 | `uv run python -m scripts.vn_stock_daily_price_store [input_json]` | Upsert `out/vn_stock_latest_prices.json` into the database named by `$DATABASE_URL`. |
+| `uv run python -m scripts.vn_stock_screen [output_csv]` | Write the liquid symbols (20-session average turnover) to `out/liquid_symbols.csv` (needs `$DATABASE_URL`). |
 | `uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]` | Fetch the latest price of all symbols (default `data/hose_symbols.csv`, takes about 20 min) and write `out/vn_stock_latest_prices.json`. |
 
 ### Pipeline state and notification
@@ -103,6 +105,21 @@ The pre-commit hook (`lefthook.yml`) runs the lint, then the unit tests with the
 
 Settings for pytest, coverage and ruff live in `pyproject.toml`.
 
+#### See the SQL
+
+Set `SQL_LOG_ENABLE=1` to log every SQL statement with its parameters (through the project's logger, to stderr). It works for all three: `SQL_LOG_ENABLE=1 uv run alembic upgrade head`, `SQL_LOG_ENABLE=1 uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json` and `SQL_LOG_ENABLE=1 uv run pytest -s` (`-s`, or `-rP` on a passing test, because pytest hides the output otherwise). SQLAlchemy's own `echo=True` is not used: logxide swallows it. In CI the `test` job sets it in the workflow (`env:` of the job, with `pytest -s`), so the log shows there without anything typed; locally `export SQL_LOG_ENABLE=1` once per shell instead of prefixing every command. A new engine must be wrapped with `libs.db.log_sql`; `connect()` already is.
+
+#### Seed the database
+
+`tests/data/prices_hpg_aam.json` holds real history of two stocks (HPG, very liquid; AAM, almost untraded). CI migrates and seeds the job's Postgres service with it before `pytest`, and `test_screen_on_the_seeded_database` checks the screen against that data. The same locally (that test is skipped while `$DATABASE_URL` is unset):
+
+```bash
+export DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv
+uv run alembic upgrade head
+uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json
+uv run pytest
+```
+
 ### CI
 
 `.github/workflows/ci.yml` runs on every pull request to `master`. The jobs run in order, and each one needs the previous one to pass.
@@ -111,7 +128,7 @@ Settings for pytest, coverage and ruff live in `pyproject.toml`.
 |---|---|
 | `install` | `uv sync --locked`, and saves the uv cache (keyed on `uv.lock`) |
 | `lint` | `ruff check libs scripts tests` |
-| `test` | `pytest` with the 95% coverage gate, against a Postgres 17 service container (same credentials as `docker-compose.yml`) |
+| `test` | Migrates and seeds the Postgres 17 service container (same credentials as `docker-compose.yml`) with `tests/data/prices_hpg_aam.json`, then `pytest` with the 95% coverage gate |
 | `audit` | `pip-audit` on the locked runtime dependencies |
 
 Later jobs restore the cache from `install`, so their own `uv sync --locked` only has to link the packages. Commit `uv.lock` whenever you change dependencies, or `--locked` makes CI fail.
@@ -124,6 +141,7 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 - Give variables clear, descriptive names: no single-letter or cryptic names (`r`, `d`, `e`, `p`, `i`). Write `result`, `data`, `error`, `price`, `index` instead.
 - No `print()` anywhere in `libs/` and `scripts/`. Log through the `Logger` interface (`libs/logger`): a library function takes a `Logger` or creates a `LogxideLogger(__name__)`, a script creates one at module level like `scripts/vn_stock_latest_price_retrieval.py`. `LogxideLogger` writes to stderr. To write GitHub Actions annotations use `GithubActionsLogger(title)` (it writes the `::notice::` / `::warning::` / `::error::` commands to stdout, where the runner reads them). Ruff's `T20` rule enforces this in `libs`, `scripts` and `migrations`; only `tests/` is exempt.
 - Use UPPER_CASE only for constants (fixed values such as `NO_DATA`, `UA`, `SYMBOL_RE`). Anything else, like a logger, a client or a session, is lower case. Create it inside a function or as a lower-case variable, not as an upper-case global.
+- File formats: CSV for a flat list of codes (`data/hose_symbols.csv`, `out/liquid_symbols.csv`; read with `read_symbols`), JSON for typed or nested records (prices, pipeline state, the analysis output; validate with the pydantic models). Do not mix the two for the same kind of data.
 
 ### Layout
 
@@ -132,11 +150,13 @@ libs/prices/   base.py (Price, PriceSource, PriceNotFoundError, helpers), dnse.p
 tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
 libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_actions.py (GithubActionsLogger, workflow commands on stdout)
 tests/libs/logger/   test_logxide.py, test_github_actions.py
-scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, pipeline_state.py, notification.py
-tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`)
-tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_pipeline_state.py, test_notification.py
+scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, vn_stock_screen.py, pipeline_state.py, notification.py
+tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`), data/prices_hpg_aam.json (real DNSE history of HPG and AAM, 2026-09-15..2026-10-29, the seed)
+tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_vn_stock_screen.py, test_pipeline_state.py, test_notification.py
 ```
 
 Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, and a negative volume.
+
+**Adding a price source:** before it is used, compare it with the existing sources (DNSE, VPS, VNDirect) on the same symbols and sessions: `open`/`high`/`low`/`close` (adjusted, thousand VND) and `volume` (matched shares, put-through trades excluded) must be identical, because `prices` mixes whichever source answered and `scripts/vn_stock_screen.py` multiplies `close × volume`. Checked on 2026-10-29 for HPG, VCB and AAM over 8 sessions: the three sources were identical.
 
 To add a source, subclass `PriceSource` in `libs/prices/`, export it in `__init__.py`, and add a matching `tests/libs/prices/test_<name>.py`.

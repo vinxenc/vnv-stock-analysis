@@ -51,6 +51,9 @@ jobs:
     name: Unit tests + coverage
     needs: lint
     runs-on: ubuntu-latest
+    env:  # read by the seed step and by pytest
+      DATABASE_URL: postgresql+psycopg://vnv:vnv@127.0.0.1:5432/vnv  # the service's CI-only credentials
+      SQL_LOG_ENABLE: "1"  # log every SQL statement (libs.db.log_sql)
     services:
       postgres:  # same server as docker-compose.yml; tests/conftest.py creates the vnv_test database
         image: postgres:17
@@ -74,8 +77,12 @@ jobs:
           prune-cache: false  # part of the cache key: must match the install job to hit its cache
       - name: Install dependencies (from cache)
         run: uv sync --locked
+      - name: Migrate and seed the database with real prices
+        run: |
+          uv run alembic upgrade head
+          uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json
       - name: Unit tests (coverage gate from pyproject.toml)
-        run: uv run pytest
+        run: uv run pytest -s  # -s: pytest would hide the SQL log of passing tests
 
   audit:
     name: Dependency vulnerability scan
