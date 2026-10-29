@@ -142,4 +142,6 @@ tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, te
 
 Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, and a negative volume.
 
+**Adding a price source:** before it is used, compare it with the existing sources (DNSE, VPS, VNDirect) on the same symbols and sessions: `open`/`high`/`low`/`close` (adjusted, thousand VND) and `volume` (matched shares, put-through trades excluded) must be identical, because `prices` mixes whichever source answered and `scripts/vn_stock_screen.py` multiplies `close × volume`. Checked on 2026-10-29 for HPG, VCB and AAM over 8 sessions: the three sources were identical.
+
 To add a source, subclass `PriceSource` in `libs/prices/`, export it in `__init__.py`, and add a matching `tests/libs/prices/test_<name>.py`.
