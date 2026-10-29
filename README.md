@@ -136,7 +136,7 @@ tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, 
 libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_actions.py (GithubActionsLogger, workflow commands on stdout)
 tests/libs/logger/   test_logxide.py, test_github_actions.py
 scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, vn_stock_screen.py, pipeline_state.py, notification.py
-tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`)
+tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`, `real_prices` = `engine` seeded from `tests/data/prices_hpg_aam.json`, real DNSE history of HPG and AAM)
 tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_vn_stock_screen.py, test_pipeline_state.py, test_notification.py
 ```
 

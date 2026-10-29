@@ -122,6 +122,11 @@ def test_main_defaults_to_today_in_vietnam(tmp_path: Path, engine: Engine, monke
     assert main(tmp_path / "liquid_symbols.csv", engine) == 0
 
 
+def test_screen_on_real_history(real_prices: Engine) -> None:
+    """HPG trades ~395 billion VND a session on average, AAM ~0.02 billion: only HPG passes."""
+    assert screen(real_prices, dt.date(2026, 10, 29)) == ["HPG"]
+
+
 def test_run_as_script(tmp_path: Path, engine: Engine, pg_url: str) -> None:
     """The real entry point: argv, DATABASE_URL and the crash on a stale session (exit 1, not 4)."""
     store(engine, ("AAA", 10, 3_000_000, TODAY))

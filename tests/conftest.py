@@ -1,9 +1,12 @@
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from sqlalchemy import Engine, text
 from sqlmodel import SQLModel, create_engine
+
+from scripts.vn_stock_daily_price_store import read_prices, store
 
 # Never the dev database `vnv`: the tests wipe their tables. `docker compose up -d --wait` provides the server.
 SERVER_URL = os.environ.get("TEST_DATABASE_SERVER", "postgresql+psycopg://vnv:vnv@127.0.0.1:5432/postgres")
@@ -34,3 +37,11 @@ def engine(pg_url: str) -> Iterator[Engine]:
     SQLModel.metadata.create_all(engine)
     yield engine
     engine.dispose()
+
+
+@pytest.fixture
+def real_prices(engine: Engine) -> Engine:
+    """`engine` seeded with real DNSE history (fetched 2026-10-29, 2026-09-15..2026-10-29): HPG, very liquid (20-session
+    average turnover ~395 billion VND), and AAM, almost untraded (~0.02 billion VND)."""
+    store(read_prices(Path(__file__).parent / "data" / "prices_hpg_aam.json"), engine)
+    return engine
