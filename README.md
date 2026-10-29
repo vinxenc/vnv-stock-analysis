@@ -16,10 +16,10 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`. Needs the `DATABASE_URL` secret of the `production` environment. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
-| `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. With `--previous` it prints the last trading day before that day instead (the `session_date` of `VN Stock Analysis`). |
+| `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
 | `scripts/pipeline_state.py`, `scripts/notification.py`, `.github/actions/pipeline-state/` | Pipeline state files and the notification that reads them (see below). |
 | `.github/workflows/vn-stock-prices-sync.yml` | `VN Stock Prices Sync`: weekday cron (22:00 Vietnam time). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
-| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (07:01 Vietnam time = 00:01 UTC) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync` the evening before), never fetches. Jobs so far: `start-analyze` → `install` → `is_holiday` (also outputs `session_date`, the last trading day before today), then `notification`. The screen, history and analyze jobs are planned in `docs/plans/phase-1-sql-screens.md`. |
+| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (22:00 Vietnam time) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync`), never fetches. Jobs so far: `start-analyze` → `install` → `is_holiday` (a day off skips the later jobs), then `notification`. The screen, history and analyze jobs are planned in `docs/plans/phase-1-sql-screens.md`. |
 
 The endpoints are undocumented and may change or block without notice.
 

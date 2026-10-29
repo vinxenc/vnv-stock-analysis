@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.vn_holiday import WORKING_DAY, off_reason, previous_trading_day
+from scripts.vn_holiday import WORKING_DAY, off_reason
 
 ROOT = Path(__file__).parents[2]
 
@@ -15,26 +15,6 @@ def test_exit_code(arg: str, code: int) -> None:
     # a crash (bad date) must not exit with the working-day code
     cmd = [sys.executable, "-m", "scripts.vn_holiday", arg]
     assert subprocess.run(cmd, capture_output=True, cwd=ROOT).returncode == code
-
-
-@pytest.mark.parametrize(
-    ("d", "previous"),
-    [
-        (date(2026, 10, 28), date(2026, 10, 27)),  # Wed -> Tue
-        (date(2026, 10, 26), date(2026, 10, 23)),  # Mon -> Fri
-        (date(2026, 10, 25), date(2026, 10, 23)),  # Sun -> Fri
-        (date(2026, 9, 3), date(2026, 8, 28)),  # after Quốc khánh (2/9), swap day 31/8 and 1/9 -> last session before
-        (date(2026, 2, 23), date(2026, 2, 13)),  # after Tết -> last session before the break
-    ],
-)
-def test_previous_trading_day(d: date, previous: date) -> None:
-    assert previous_trading_day(d) == previous
-
-
-def test_previous_flag_prints_the_date() -> None:
-    cmd = [sys.executable, "-m", "scripts.vn_holiday", "--previous", "2026-10-26"]
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
-    assert (result.returncode, result.stdout) == (0, "2026-10-23\n")
 
 
 @pytest.mark.parametrize(

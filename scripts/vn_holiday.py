@@ -1,8 +1,7 @@
 """Is today (Vietnam time) a weekend or a Vietnamese public holiday?
 
-Usage: uv run python -m scripts.vn_holiday [--previous] [YYYY-MM-DD]   (default: today in UTC+7)
+Usage: uv run python -m scripts.vn_holiday [YYYY-MM-DD]   (default: today in UTC+7)
 Exit 0 = day off (weekend/holiday), 3 = working day, anything else = the check itself failed.
---previous: instead print (stdout, YYYY-MM-DD) the last trading day before that day, and exit 0.
 Holidays come from the `holidays` package: Tết, Giỗ Tổ (lunar), nghỉ bù, and government-decreed swap days.
 """
 import sys
@@ -24,20 +23,8 @@ def off_reason(day: date) -> str | None:
     return holidays.VN(years=day.year).get(day)
 
 
-def previous_trading_day(day: date) -> date:
-    """The most recent day before `day` that is not a weekend or public holiday."""
-    day -= timedelta(days=1)
-    while off_reason(day):
-        day -= timedelta(days=1)
-    return day
-
-
 if __name__ == "__main__":
-    args = [arg for arg in sys.argv[1:] if arg != "--previous"]
-    day = date.fromisoformat(args[0]) if args else datetime.now(VN_TZ).date()
-    if "--previous" in sys.argv:
-        sys.stdout.write(f"{previous_trading_day(day)}\n")  # stdout is the data; the logger writes to stderr
-        sys.exit(0)
+    day = date.fromisoformat(sys.argv[1]) if len(sys.argv) > 1 else datetime.now(VN_TZ).date()
     reason = off_reason(day)
     logger.info("%s %s: %s", day, f"{day:%a}", f"day off ({reason})" if reason else "working day")
     sys.exit(0 if reason else WORKING_DAY)

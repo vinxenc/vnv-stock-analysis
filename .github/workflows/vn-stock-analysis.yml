@@ -2,8 +2,8 @@ name: VN Stock Analysis
 
 on:
   schedule:
-    # 07:01 giờ VN (UTC+7) = 00:01 UTC, thứ 2 - thứ 6. Giá của phiên trước đã được vn-stock-prices-sync.yml lưu từ 22:00 hôm qua
-    - cron: "1 0 * * 1-5"
+    # 22:00 giờ VN (UTC+7) = 15:00 UTC, thứ 2 - thứ 6
+    - cron: "0 15 * * 1-5"
   workflow_dispatch:
 
 permissions:
@@ -55,7 +55,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       holiday: ${{ steps.check.outputs.holiday }}
-      session_date: ${{ steps.session.outputs.session_date }}  # the last trading day before today: the session the analysis is about
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -82,17 +81,12 @@ jobs:
             3) echo "holiday=false" >> "$GITHUB_OUTPUT" ;;
             *) exit "$rc" ;;
           esac
-      - name: Find the session date
-        id: session
-        run: |
-          session_date=$(uv run --no-sync python -m scripts.vn_holiday --previous)
-          echo "session_date=$session_date" >> "$GITHUB_OUTPUT"
       - if: always()
         uses: ./.github/actions/pipeline-state
         with:
           pipeline: is_holiday
           job-status: ${{ job.status }}
-          success-message: ${{ steps.check.outputs.holiday == 'true' && 'Today is Holiday, Pipeline will ignore' || format('Today is a working day, analysing the session of {0}', steps.session.outputs.session_date) }}
+          success-message: ${{ steps.check.outputs.holiday == 'true' && 'Today is Holiday, Pipeline will ignore' || 'Today is a working day' }}
           failure-message: Pipeline failed, can not check the holiday
           success-level: ${{ steps.check.outputs.holiday == 'true' && 'warning' || 'info' }}
 
