@@ -1,5 +1,6 @@
 import pytest
-from sqlalchemy import Engine, text
+from sqlalchemy import text
+from sqlmodel import create_engine
 
 from libs.db import connect, database_url, log_sql
 
@@ -20,8 +21,9 @@ def test_connect_sets_timeouts(monkeypatch: pytest.MonkeyPatch, pg_url: str) -> 
 
 
 def test_log_sql_logs_statements_only_when_asked(
-    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], engine: Engine
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], pg_url: str
 ) -> None:
+    engine = create_engine(pg_url)  # not the `engine` fixture: it is already wrapped when SQL_LOG_ENABLE is set
     monkeypatch.delenv("SQL_LOG_ENABLE", raising=False)
     with log_sql(engine).connect() as connection:
         connection.execute(text("SELECT 11111"))

@@ -107,7 +107,7 @@ Settings for pytest, coverage and ruff live in `pyproject.toml`.
 
 #### See the SQL
 
-Set `SQL_LOG_ENABLE=1` to log every SQL statement with its parameters (through the project's logger, to stderr). It works for all three: `SQL_LOG_ENABLE=1 uv run alembic upgrade head`, `SQL_LOG_ENABLE=1 uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json` and `SQL_LOG_ENABLE=1 uv run pytest -s` (`-s`, or `-rP` on a passing test, because pytest hides the output otherwise). SQLAlchemy's own `echo=True` is not used: logxide swallows it. A new engine must be wrapped with `libs.db.log_sql`; `connect()` already is.
+Set `SQL_LOG_ENABLE=1` to log every SQL statement with its parameters (through the project's logger, to stderr). It works for all three: `SQL_LOG_ENABLE=1 uv run alembic upgrade head`, `SQL_LOG_ENABLE=1 uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json` and `SQL_LOG_ENABLE=1 uv run pytest -s` (`-s`, or `-rP` on a passing test, because pytest hides the output otherwise). SQLAlchemy's own `echo=True` is not used: logxide swallows it. In CI the `test` job sets it in the workflow (`env:` of the job, with `pytest -s`), so the log shows there without anything typed; locally `export SQL_LOG_ENABLE=1` once per shell instead of prefixing every command. A new engine must be wrapped with `libs.db.log_sql`; `connect()` already is.
 
 #### Seed the database
 
