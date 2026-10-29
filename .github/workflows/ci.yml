@@ -74,8 +74,16 @@ jobs:
           prune-cache: false  # part of the cache key: must match the install job to hit its cache
       - name: Install dependencies (from cache)
         run: uv sync --locked
+      - name: Migrate and seed the database with real prices
+        run: |
+          uv run alembic upgrade head
+          uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json
+        env:
+          DATABASE_URL: postgresql+psycopg://vnv:vnv@127.0.0.1:5432/vnv  # the service's CI-only credentials
       - name: Unit tests (coverage gate from pyproject.toml)
         run: uv run pytest
+        env:
+          DATABASE_URL: postgresql+psycopg://vnv:vnv@127.0.0.1:5432/vnv  # tests on the seeded database use it
 
   audit:
     name: Dependency vulnerability scan

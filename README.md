@@ -105,6 +105,17 @@ The pre-commit hook (`lefthook.yml`) runs the lint, then the unit tests with the
 
 Settings for pytest, coverage and ruff live in `pyproject.toml`.
 
+#### Seed the database
+
+`tests/data/prices_hpg_aam.json` holds real history of two stocks (HPG, very liquid; AAM, almost untraded). CI migrates and seeds the job's Postgres service with it before `pytest`, and `test_screen_on_the_seeded_database` checks the screen against that data. The same locally (that test is skipped while `$DATABASE_URL` is unset):
+
+```bash
+export DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv
+uv run alembic upgrade head
+uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json
+uv run pytest
+```
+
 ### CI
 
 `.github/workflows/ci.yml` runs on every pull request to `master`. The jobs run in order, and each one needs the previous one to pass.
@@ -136,7 +147,7 @@ tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, 
 libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_actions.py (GithubActionsLogger, workflow commands on stdout)
 tests/libs/logger/   test_logxide.py, test_github_actions.py
 scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, vn_stock_screen.py, pipeline_state.py, notification.py
-tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`, `real_prices` = `engine` seeded from `tests/data/prices_hpg_aam.json`, real DNSE history of HPG and AAM)
+tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`), data/prices_hpg_aam.json (real DNSE history of HPG and AAM, 2026-09-15..2026-10-29, the seed)
 tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_vn_stock_screen.py, test_pipeline_state.py, test_notification.py
 ```
 

@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy import Engine
 from sqlmodel import Session
 
+from libs.db import connect
 from libs.db.models import Price
 from scripts import vn_stock_screen
 from scripts.vn_stock_latest_price_retrieval import read_symbols
@@ -122,9 +123,17 @@ def test_main_defaults_to_today_in_vietnam(tmp_path: Path, engine: Engine, monke
     assert main(tmp_path / "liquid_symbols.csv", engine) == 0
 
 
-def test_screen_on_real_history(real_prices: Engine) -> None:
-    """HPG trades ~395 billion VND a session on average, AAM ~0.02 billion: only HPG passes."""
-    assert screen(real_prices, dt.date(2026, 10, 29)) == ["HPG"]
+def test_screen_on_the_seeded_database() -> None:
+    """HPG trades ~395 billion VND a session on average, AAM ~0.02 billion: only HPG passes.
+
+    Runs on the database named by $DATABASE_URL, seeded with real history (see README, "Seed the database"): CI does it
+    before pytest. Skipped when $DATABASE_URL is not set.
+    """
+    if "DATABASE_URL" not in os.environ:
+        pytest.skip("$DATABASE_URL not set: migrate and seed a database first (README, 'Seed the database')")
+    engine = connect()
+    assert screen(engine, dt.date(2026, 10, 29)) == ["HPG"]
+    engine.dispose()
 
 
 def test_run_as_script(tmp_path: Path, engine: Engine, pg_url: str) -> None:
