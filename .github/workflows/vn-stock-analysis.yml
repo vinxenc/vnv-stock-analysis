@@ -1,4 +1,4 @@
-name: VN-Stock-Analysis
+name: VN Stock Prices Sync
 
 on:
   schedule:
@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - run: echo "start pipeline vn stock analysis"
+      - run: echo "start pipeline vn stock prices sync"
       - if: always()
         uses: ./.github/actions/pipeline-state
         with:

@@ -18,7 +18,7 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
 | `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
 | `scripts/pipeline_state.py`, `scripts/notification.py`, `.github/actions/pipeline-state/` | Pipeline state files and the notification that reads them (see below). |
-| `.github/workflows/vn-stock-analysis.yml` | `VN-Stock-Analysis`: weekday cron (22:00 Vietnam time). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
+| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Prices Sync`: weekday cron (22:00 Vietnam time). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
 
 The endpoints are undocumented and may change or block without notice.
 
@@ -64,7 +64,7 @@ In production the `Migrate-Database` workflow applies the migrations on every pu
 
 ### Pipeline state and notification
 
-Every job of `VN-Stock-Analysis` before `notification` ends with the `.github/actions/pipeline-state` composite action. It runs even when the job failed, writes `state/<pipeline>.json` and uploads it as the artifact `pipeline-state-<pipeline>`:
+Every job of `VN Stock Prices Sync` before `notification` ends with the `.github/actions/pipeline-state` composite action. It runs even when the job failed, writes `state/<pipeline>.json` and uploads it as the artifact `pipeline-state-<pipeline>`:
 
 ```json
 {"level": "info", "message": "Stored the prices in the database", "pipeline": "vn_stock_daily_price_store"}
