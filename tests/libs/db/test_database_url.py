@@ -15,4 +15,5 @@ def test_connect_sets_timeouts(monkeypatch: pytest.MonkeyPatch, pg_url: str) -> 
     engine = connect()
     with engine.connect() as connection:
         assert connection.execute(text("SHOW statement_timeout")).scalar() == "1min"
+        assert connection.connection.dbapi_connection.info.get_parameters()["connect_timeout"] == "10"
     engine.dispose()

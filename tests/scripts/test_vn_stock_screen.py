@@ -3,12 +3,14 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import Engine
 from sqlmodel import Session
 
 from libs.db.models import Price
+from scripts import vn_stock_screen
 from scripts.vn_stock_latest_price_retrieval import read_symbols
 from scripts.vn_stock_screen import MIN_TURNOVER, NO_DATA, SESSIONS, main, screen
 
@@ -95,10 +97,29 @@ def test_main_nobody_liquid_is_no_data(tmp_path: Path, engine: Engine) -> None:
     assert not path.exists()
 
 
-def test_main_defaults_to_today_in_vietnam(tmp_path: Path, engine: Engine) -> None:
-    store(engine, ("AAA", 10, 3_000_000, TODAY))
-    with pytest.raises(RuntimeError, match="expected"):
-        main(tmp_path / "liquid_symbols.csv", engine)
+def test_screen_drops_a_symbol_halted_today_even_with_a_high_average(engine: Engine) -> None:
+    store(engine, *[("AAA", 20_000, 20_000, d) for d in days(19, YESTERDAY)], ("AAA", 20_000, 0, TODAY))  # avg 380 bn
+    store(engine, ("BBB", 10, 3_000_000, TODAY))
+    assert screen(engine, TODAY) == ["BBB"]
+
+
+def test_main_removes_an_old_shortlist_when_nobody_is_liquid(tmp_path: Path, engine: Engine) -> None:
+    path = tmp_path / "liquid_symbols.csv"
+    path.write_text("code\nOLD\n", encoding="utf-8")
+    store(engine, ("AAA", 1, 1, TODAY))
+    assert main(path, engine, TODAY) == NO_DATA
+    assert not path.exists()
+
+
+def test_main_defaults_to_today_in_vietnam(tmp_path: Path, engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeDatetime(dt.datetime):
+        @classmethod
+        def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
+            return dt.datetime(2026, 10, 23, 18, 0, tzinfo=dt.UTC).astimezone(tz)  # 25:00 in Vietnam: already the 24th
+
+    monkeypatch.setattr(vn_stock_screen, "dt", SimpleNamespace(datetime=FakeDatetime))
+    store(engine, ("AAA", 10, 3_000_000, dt.date(2026, 10, 24)))  # the Vietnam date, not the UTC one (23rd)
+    assert main(tmp_path / "liquid_symbols.csv", engine) == 0
 
 
 def test_run_as_script(tmp_path: Path, engine: Engine, pg_url: str) -> None:

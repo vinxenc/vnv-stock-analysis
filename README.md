@@ -126,6 +126,7 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 - Give variables clear, descriptive names: no single-letter or cryptic names (`r`, `d`, `e`, `p`, `i`). Write `result`, `data`, `error`, `price`, `index` instead.
 - No `print()` anywhere in `libs/` and `scripts/`. Log through the `Logger` interface (`libs/logger`): a library function takes a `Logger` or creates a `LogxideLogger(__name__)`, a script creates one at module level like `scripts/vn_stock_latest_price_retrieval.py`. `LogxideLogger` writes to stderr. To write GitHub Actions annotations use `GithubActionsLogger(title)` (it writes the `::notice::` / `::warning::` / `::error::` commands to stdout, where the runner reads them). Ruff's `T20` rule enforces this in `libs`, `scripts` and `migrations`; only `tests/` is exempt.
 - Use UPPER_CASE only for constants (fixed values such as `NO_DATA`, `UA`, `SYMBOL_RE`). Anything else, like a logger, a client or a session, is lower case. Create it inside a function or as a lower-case variable, not as an upper-case global.
+- File formats: CSV for a flat list of codes (`data/hose_symbols.csv`, `out/liquid_symbols.csv`; read with `read_symbols`), JSON for typed or nested records (prices, pipeline state, the analysis output; validate with the pydantic models). Do not mix the two for the same kind of data.
 
 ### Layout
 

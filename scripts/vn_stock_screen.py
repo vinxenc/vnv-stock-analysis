@@ -12,7 +12,7 @@ import datetime as dt
 import sys
 from pathlib import Path
 
-from sqlalchemy import Engine, func
+from sqlalchemy import Engine, case, func
 from sqlmodel import Session, select
 
 from libs.db import connect
@@ -27,10 +27,11 @@ logger = LogxideLogger("vn_stock_screen")
 
 
 def screen(engine: Engine, today: dt.date, log: Logger = logger) -> list[str]:
-    """Symbols with a row today whose average `close × volume` over their last SESSIONS rows is >= MIN_TURNOVER.
+    """Symbols that traded today and whose average `close × volume` over their last SESSIONS rows is >= MIN_TURNOVER.
 
-    Sorted. A halted day (volume 0) counts as 0 turnover. ponytail: a symbol with less history is judged on what it
-    has, so until `prices` is backfilled a new listing passes on a single big day; require SESSIONS rows then.
+    Sorted. A symbol with no row today, or a halted one (volume 0 today), is dropped whatever its average. A halted
+    earlier day counts as 0 turnover. A symbol with fewer than SESSIONS rows is averaged over the rows it has.
+    ponytail: until `prices` is backfilled a new listing can pass on a single big day; require SESSIONS rows then.
     """
     recent = (
         select(
@@ -50,7 +51,7 @@ def screen(engine: Engine, today: dt.date, log: Logger = logger) -> list[str]:
             select(recent.c.symbol, func.avg(recent.c.turnover))
             .where(recent.c.rank <= SESSIONS)
             .group_by(recent.c.symbol)
-            .having(func.max(recent.c.date) == today)
+            .having(func.max(case((recent.c.date == today, recent.c.turnover), else_=0)) > 0)  # traded today
         ).all()
     liquid = sorted(symbol for symbol, average in rows if average >= MIN_TURNOVER)
     log.info("%s: kept %d of %d symbols, dropped %d", today, len(liquid), len(rows), len(rows) - len(liquid))
@@ -66,6 +67,7 @@ def main(
     liquid = screen(engine or connect(), today or dt.datetime.now(VN_TZ).date(), log)
     if not liquid:
         log.error("no symbol reaches the turnover threshold, nothing written")
+        output_csv.unlink(missing_ok=True)  # an older shortlist must not pass for today's
         return NO_DATA
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with output_csv.open("w", encoding="utf-8", newline="") as file:
