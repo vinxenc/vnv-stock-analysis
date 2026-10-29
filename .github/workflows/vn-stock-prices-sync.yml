@@ -1,0 +1,181 @@
+name: VN Stock Prices Sync
+
+on:
+  schedule:
+    # 22:00 giờ VN (UTC+7) = 15:00 UTC, thứ 2 - thứ 6
+    - cron: "0 15 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  start-analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: echo "start pipeline vn stock prices sync"
+      - if: always()
+        uses: ./.github/actions/pipeline-state
+        with:
+          pipeline: start-analyze
+          job-status: ${{ job.status }}
+          success-message: Pipeline started
+          failure-message: Pipeline could not start
+
+  # Runs first and fills the uv cache (keyed on uv.lock); the jobs below restore it.
+  install:
+    name: Install dependencies
+    needs: start-analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          prune-cache: false  # pruning drops the pre-built wheels, leaving an empty cache
+          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
+      - name: Install dependencies
+        run: uv sync --locked --no-dev
+      - if: always()
+        uses: ./.github/actions/pipeline-state
+        with:
+          pipeline: install
+          job-status: ${{ job.status }}
+          success-message: Dependencies installed
+          failure-message: Pipeline failed, can not install dependencies
+
+  is_holiday:
+    needs: install
+    runs-on: ubuntu-latest
+    outputs:
+      holiday: ${{ steps.check.outputs.holiday }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false
+          prune-cache: false  # part of the cache key: must match the install job to hit its cache
+          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
+      - name: Install dependencies (from cache)
+        run: uv sync --locked --no-dev
+      - name: Check today (Vietnam time)
+        id: check
+        # the script exits 0 on a day off, 3 on a working day; any other code is a failed check and fails the job
+        run: |
+          rc=0
+          uv run --no-sync python -m scripts.vn_holiday || rc=$?
+          case "$rc" in
+            0)
+              echo "holiday=true" >> "$GITHUB_OUTPUT"
+              ;;
+            3) echo "holiday=false" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$rc" ;;
+          esac
+      - if: always()
+        uses: ./.github/actions/pipeline-state
+        with:
+          pipeline: is_holiday
+          job-status: ${{ job.status }}
+          success-message: ${{ steps.check.outputs.holiday == 'true' && 'Today is Holiday, Pipeline will ignore' || 'Today is a working day' }}
+          failure-message: Pipeline failed, can not check the holiday
+          success-level: ${{ steps.check.outputs.holiday == 'true' && 'warning' || 'info' }}
+
+  retrieve_prices:
+    name: vn stock latest price retrieval
+    needs: is_holiday
+    if: needs.is_holiday.outputs.holiday == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false
+          prune-cache: false  # part of the cache key: must match the install job to hit its cache
+          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
+      - name: Install dependencies (from cache)
+        run: uv sync --locked --no-dev
+      - name: Retrieve latest prices
+        # exits 0 with a JSON file, 4 when no symbol could be fetched; any non-zero code fails the job
+        run: uv run --no-sync python -m scripts.vn_stock_latest_price_retrieval
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: vn-stock-latest-prices
+          path: out/vn_stock_latest_prices.json
+          retention-days: 7
+          if-no-files-found: error
+      - if: always()
+        uses: ./.github/actions/pipeline-state
+        with:
+          pipeline: retrieve_prices
+          job-status: ${{ job.status }}
+          success-message: Retrieved the latest prices
+          failure-message: Pipeline failed, can not retrieve any stock price data
+
+  vn_stock_daily_price_store:
+    name: vn stock daily price store
+    needs: retrieve_prices
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # the script has its own database timeouts; this is the backstop
+    environment: production  # DATABASE_URL is an environment secret, limited to master
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          save-cache: false
+          prune-cache: false  # part of the cache key: must match the install job to hit its cache
+          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
+      - name: Install dependencies (from cache)
+        run: uv sync --locked --no-dev
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: vn-stock-latest-prices
+          path: out
+      - name: Store prices (upsert)
+        run: uv run --no-sync python -m scripts.vn_stock_daily_price_store
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - if: always()
+        uses: ./.github/actions/pipeline-state
+        with:
+          pipeline: vn_stock_daily_price_store
+          job-status: ${{ job.status }}
+          success-message: Stored the prices in the database
+          failure-message: Pipeline failed, can not store the prices in the database
+
+  notification:
+    needs: [start-analyze, install, is_holiday, retrieve_prices, vn_stock_daily_price_store]
+    if: always()  # also after a failed or skipped job: it only reads the state files they wrote
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: pipeline-state-*
+          merge-multiple: true
+          path: state
+      - name: Log every pipeline state as an annotation
+        env:
+          NEEDS: ${{ toJSON(needs) }}  # fallback for a job that died before it could write its state
+        # system python, not uv: it must still run when the dependencies could not be installed
+        run: python3 -m scripts.notification state
