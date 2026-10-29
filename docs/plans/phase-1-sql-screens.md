@@ -7,7 +7,9 @@ Option 1 = "build a short list from the data, then one LLM call writes the summa
 ## Decisions and open items
 
 Decided by the user:
-- Schedule: GitHub Actions only, 00:01 UTC (07:01 Vietnam), Mon–Fri. `is_holiday` checks **today**; the session analysed is the previous trading day (`session_date`).
+- New pipeline, not a replacement: the existing sync workflow keeps filling `prices`, now at 20:00 VN (it was 22:00); the analysis is a second workflow.
+- Schedule: GitHub Actions only, 15:00 UTC (22:00 Vietnam), Mon–Fri. `is_holiday` checks **today**: a day off → the rest is skipped, otherwise the later jobs run. The session analysed is today's (the market closed at 15:00 VN).
+- Ordering: the sync runs at 20:00 VN and takes about 20 min, the analysis starts at 22:00 VN, so the prices are stored well before. A late or failed sync is caught by the date check in `vn_stock_screen`.
 - Liquidity filter: turnover (`close × volume`) of the latest session ≥ **20 billion VND**.
 - Jobs: `vn_stock_screen`, `vn_stock_get_history` (reads the existing DB, never writes), `vn_stock_analyze`; the LLM job comes in Phase 2.
 - Ranking: one composite score 0–100, buy side, trend / breakout profile, the 24-indicator table below.
@@ -22,16 +24,18 @@ Open, for the next session to decide:
 ## Flow
 
 ```
-cron 00:01 UTC = 07:01 Vietnam, Mon–Fri
+existing workflow "VN Stock Prices Sync" (vn-stock-prices-sync.yml), unchanged: cron 20:00 Vietnam (13:00 UTC), Mon–Fri
+  … → retrieve_prices → vn_stock_daily_price_store      latest bar of all 406 symbols → prices
+
+NEW workflow "VN Stock Analysis" (vn-stock-analysis.yml): cron 15:00 UTC = 22:00 Vietnam, Mon–Fri (two hours after the sync)
   start-analyze → install → is_holiday (is TODAY a working day?)
-    → retrieve_prices → vn_stock_daily_price_store      existing: latest bar of all 406 symbols → prices
     → vn_stock_screen        drop illiquid symbols      → shortlist (artifact)
     → vn_stock_get_history   history of the shortlist, read from the DB → history (artifact)
     → vn_stock_analyze       features, signals, ranking → JSON artifact + job summary
     → notification
 ```
 
-The latest bar fetched at 07:01 is the previous trading day's: Monday → Friday, any other day → the day before, a day after a holiday → the last session before the holiday. The sources never return a Saturday session (HOSE is closed).
+The new workflow fetches nothing: it reads the bar of today's session from `prices`, which the sync workflow stores. The sources never return a Saturday session (HOSE is closed).
 
 Out of scope for Phase 1: the LLM call (Phase 2), an agent that explores the data, Telegram / email (GitHub job summary only), news and financial statements (only the `prices` table), and **filling the history in `prices`** (assumed done, see Assumptions).
 
@@ -43,24 +47,25 @@ Out of scope for Phase 1: the LLM call (Phase 2), an agent that explores the dat
 
 Every new job follows the existing pattern: `environment: production` when it needs `DATABASE_URL`, ends with the `pipeline-state` action, is added to `notification`'s `needs`, logs through `Logger` (never `print`), has type hints, and keeps the 95% coverage gate.
 
-### 1. Everything runs on GitHub Actions at 07:01 Vietnam time (00:01 UTC), Mon–Fri
+### 1. Everything runs on GitHub Actions at 22:00 Vietnam time (15:00 UTC), Mon–Fri
 
-- [ ] `vn-stock-analysis.yml`: replace the cron `0 15 * * 1-5` (22:00 VN) with `1 0 * * 1-5`. Same weekdays, because 00:01 UTC is 07:01 on the same calendar day in Vietnam.
-- [ ] `is_holiday` keeps checking **today** (VN): weekend or public holiday → the rest of the pipeline is skipped; working day → it proceeds. Update the job's messages only if the wording no longer fits.
-- [ ] `is_holiday` also exposes the session date as the job output `session_date` = the most recent day before today that is not a weekend or holiday (Monday → Friday; the day after a holiday → the last session before it). Reuse `off_reason` in `scripts/vn_holiday.py` with a small `previous_trading_day()` plus a way to print it, with tests. No other job recomputes it.
-- [ ] `vn_stock_screen` and `vn_stock_analyze` receive `session_date` as an argument. `vn_stock_screen` fails if `max(date)` in `prices` is not that day (store failed or the source is stale), instead of reporting old data as fresh.
-- [ ] Nothing runs outside GitHub Actions: no local cron, no extra server.
-- [ ] Time budget: retrieval is about 20 min; the rest should add only a few minutes, so the run finishes before the 09:00 open. GitHub may delay scheduled runs, so keep the margin.
-- [ ] Update the README (it says 22:00 Vietnam time) and the table of jobs.
+- [x] Rename `vn-stock-analysis.yml` to `vn-stock-prices-sync.yml` (it is the "VN Stock Prices Sync" workflow), only the cron changes, `0 15 * * 1-5` (22:00 VN) → `0 13 * * 1-5` (20:00 VN); retrieve + store only. It stays the only writer of `prices`.
+- [x] Add a new workflow `vn-stock-analysis.yml`, named `VN Stock Analysis`, cron `0 15 * * 1-5` (15:00 UTC = 22:00 Vietnam, same calendar day), plus `workflow_dispatch`. Same shape as the sync workflow: `start-analyze` → `install` → `is_holiday` → jobs below → `notification`. No `retrieve_prices` and no store job: it only reads `prices`. Reuse the composite actions (`pipeline-state`) and the `uv` cache rule from the README (`prune-cache: false`, only `install` saves the cache).
+- [x] The new workflow has its own `is_holiday` job (copy of the sync workflow's, same script) that checks **today** (VN): weekend or public holiday → the rest of the pipeline is skipped; working day → it proceeds.
+- [x] `scripts/vn_holiday.py` is unchanged (exit 0 = day off, 3 = working day). The new workflow's `is_holiday` only decides whether the later jobs run: day off → skipped, working day → they proceed. No `session_date` output; the session analysed is today (VN).
+- [ ] `vn_stock_screen` fails if `max(date)` in `prices` is not today (VN) (the sync failed, has not finished yet, or the source is stale), instead of reporting old data as fresh. `vn_stock_analyze` takes the same date from the screen's output.
+- [x] Nothing runs outside GitHub Actions: no local cron, no extra server.
+- [ ] Time budget: no retrieval in this workflow, so the whole run should take only a few minutes and finish well before the 09:00 open. GitHub may delay scheduled runs, so keep the margin.
+- [x] Update the README: add the new workflow to the files table and its jobs; the sync workflow's description now says 20:00.
 
 ### 2. `vn_stock_screen` — drop illiquid symbols (SQL on the latest trading day)
 
-- [ ] Job `vn_stock_screen`, `needs: vn_stock_daily_price_store`, uses `DATABASE_URL` (ideally a read-only role).
-- [ ] Check `max(date)` = `session_date` (see 1); otherwise fail.
+- [ ] Job `vn_stock_screen`, `needs: is_holiday`, uses `DATABASE_URL` (ideally a read-only role).
+- [ ] Check `max(date)` = today (VN) (see 1); otherwise fail.
 - [ ] SQL on that day only: turnover = `close × volume` (thousand VND). Keep symbols with **turnover ≥ 20 billion VND per day** = 20,000,000 thousand VND. Keep the threshold as one named constant in the script.
 - [ ] Symbols with `volume = 0` (halted) drop out naturally; log how many were kept and dropped.
 - [ ] **Before trusting the threshold, verify the volume definition.** VNDirect's `nmVolume` is matched volume only (no put-through trades); DNSE and VPS `v` must be the same unit (shares) and definition, otherwise a symbol's turnover changes with whichever source answered that day. Compare one liquid symbol on the same day across the 3 sources.
-- [ ] Market-wide numbers are computed here, because only this job has all 406 symbols: over every symbol that has a row on `session_date` and on the preceding session, one SQL aggregate for advancers / decliners / unchanged, total volume, total turnover, and the median one-day change. `vn_stock_analyze` cannot compute them from the shortlist history.
+- [ ] Market-wide numbers are computed here, because only this job has all 406 symbols: over every symbol that has a row on today's session and on the preceding session, one SQL aggregate for advancers / decliners / unchanged, total volume, total turnover, and the median one-day change. `vn_stock_analyze` cannot compute them from the shortlist history.
 - [ ] Output artifact `vn-stock-screen` with two files: `liquid_symbols.csv` (a `code` column, same shape as `data/hose_symbols.csv`, so `read_symbols` is reused) and `market.json` (the numbers above).
 - [ ] Exit 4 (the existing "no data" code) when the shortlist is empty; the job then fails.
 - [ ] Tests on the real Postgres fixture: threshold edge (exactly 20 billion kept), halted symbol, wrong `max(date)`.
@@ -80,7 +85,7 @@ Every new job follows the existing pattern: `environment: production` when it ne
 - [ ] Job `vn_stock_analyze`, `needs: vn_stock_get_history`, no DB secret. Inputs: the `vn-stock-history` artifact and `market.json` from `vn-stock-screen` (whole-market breadth, volume and median change; they go into the output for the summary, no indicator uses them).
 - [ ] Stages, as plain functions in one job: load and validate → features per symbol → signal flags → ranking → output.
 - [ ] Libraries: TA-Lib (runtime dependency) for the standard indicators, stdlib for everything else. Details, verified facts and open points in "Libraries".
-- [ ] Computation by **rows**, never calendar dates (holidays). A symbol must have a row on `session_date`; keep only symbols with a row on the preceding session too, put the others in a "missing previous session" list and count them. An indicator with too little history is `unavailable` and a symbol below the coverage gate is `"insufficient data"` (see Scoring design); neither is ever a failure.
+- [ ] Computation by **rows**, never calendar dates (holidays). A symbol must have a row on today's session; keep only symbols with a row on the preceding session too, put the others in a "missing previous session" list and count them. An indicator with too little history is `unavailable` and a symbol below the coverage gate is `"insufficient data"` (see Scoring design); neither is ever a failure.
 - [ ] When a one-day change is beyond the HOSE band (±7%, to be verified), label the symbol "suspected corporate action" **and exclude it from every feature whose window contains that day** (returns, moving averages, highs/lows, volume average); otherwise one ex-rights day skews its features for 20–50 sessions. See Notes.
 - [ ] Output `out/vn_stock_analysis.json` (pydantic model; Phase 2 reads it, so keep it stable): `as_of`, shortlist coverage (e.g. 120 of 406 symbols), counts of `insufficient data` and flagged symbols, sources used, the whole-market numbers from `market.json`, and one entry per symbol as described in "Output per symbol". Upload it as artifact `vn-stock-analysis`.
 - [ ] Render the ranked symbols (score, coverage, theme subtotals, flags) and the market numbers as markdown tables into `$GITHUB_STEP_SUMMARY`.
@@ -91,7 +96,7 @@ Every new job follows the existing pattern: `environment: production` when it ne
 
 - [ ] A manual run against a local DB with fake data gives the right shortlist, history and JSON.
 - [ ] A real `workflow_dispatch` run shows the score table in the job summary.
-- [ ] A day off: all jobs after `is_holiday` are skipped. A failed store job: `vn_stock_screen` does not run.
+- [ ] A day off: all jobs after `is_holiday` are skipped. A failed sync (no bar for today): `vn_stock_screen` fails instead of reporting old data. The sync workflow's cron and jobs are unchanged.
 - [ ] `uv run pytest` ≥ 95% coverage, ruff clean.
 
 ## Scoring design (buy side, trend / breakout profile)
@@ -242,7 +247,7 @@ From a `/ponytail-review` of these plans on 2026-10-28. The agent that reads thi
 5. **Move `connect()`** (10 s connect and 60 s statement timeouts) from `scripts/vn_stock_daily_price_store.py` to `libs/db/__init__.py` next to `database_url()`, because steps 2 and 3 need it. Do not copy it or import from a script module.
 6. **Step 3 output:** write JSON with `Price.model_dump(mode="json")` and read it back with the existing `read_prices` (it validates and drops duplicates); no new reader.
 7. **Document hygiene:** move "Facts for the backfill task" to that task's own plan; delete Phase 2's "After Phase 2" paragraph; Phase 2's ticker check with the `VND` exception (about 10 lines) guards a failure the score table already exposes, so add it only when the LLM actually invents a ticker.
-8. **Kept on purpose:** `session_date` as a job output passed to the later jobs (recomputing it in each script saves little and loses consistency).
+8. **Dropped:** the `session_date` job output; the session is simply today (VN).
 
 ## Notes
 
