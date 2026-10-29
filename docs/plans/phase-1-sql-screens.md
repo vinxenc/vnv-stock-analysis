@@ -7,15 +7,15 @@ Option 1 = "build a short list from the data, then one LLM call writes the summa
 ## Decisions and open items
 
 Decided by the user:
-- New pipeline, not a replacement: the existing sync workflow keeps its 22:00 cron and keeps filling `prices`; the analysis is a second workflow.
+- New pipeline, not a replacement: the existing sync workflow keeps filling `prices`, now at 20:00 VN (it was 22:00); the analysis is a second workflow.
 - Schedule: GitHub Actions only, 15:00 UTC (22:00 Vietnam), Mon–Fri. `is_holiday` checks **today**: a day off → the rest is skipped, otherwise the later jobs run. The session analysed is today's (the market closed at 15:00 VN).
+- Ordering: the sync runs at 20:00 VN and takes about 20 min, the analysis starts at 22:00 VN, so the prices are stored well before. A late or failed sync is caught by the date check in `vn_stock_screen`.
 - Liquidity filter: turnover (`close × volume`) of the latest session ≥ **20 billion VND**.
 - Jobs: `vn_stock_screen`, `vn_stock_get_history` (reads the existing DB, never writes), `vn_stock_analyze`; the LLM job comes in Phase 2.
 - Ranking: one composite score 0–100, buy side, trend / breakout profile, the 24-indicator table below.
 - Library for the indicators: **TA-Lib** (see "Libraries").
 
 Open, for the next session to decide:
-- **Ordering with the sync:** both workflows run at 22:00 VN, and the sync needs about 20 min to retrieve and store, so the analysis would read yesterday's bar and `vn_stock_screen` would fail its date check. Options: start the analysis with `workflow_run` after the sync succeeds, or move its cron later.
 - The ponytail simplification suggestions ("Simplification suggestions" below, none applied).
 - Candle patterns: hand-written gap-free versions or TA-Lib's gap-based ones.
 - Who fills the history in `prices`, and when.
@@ -24,10 +24,10 @@ Open, for the next session to decide:
 ## Flow
 
 ```
-existing workflow "VN Stock Prices Sync" (vn-stock-prices-sync.yml), unchanged: cron 22:00 Vietnam, Mon–Fri
+existing workflow "VN Stock Prices Sync" (vn-stock-prices-sync.yml), unchanged: cron 20:00 Vietnam (13:00 UTC), Mon–Fri
   … → retrieve_prices → vn_stock_daily_price_store      latest bar of all 406 symbols → prices
 
-NEW workflow "VN Stock Analysis" (vn-stock-analysis.yml): cron 15:00 UTC = 22:00 Vietnam, Mon–Fri (same time as the sync; see the open item about ordering)
+NEW workflow "VN Stock Analysis" (vn-stock-analysis.yml): cron 15:00 UTC = 22:00 Vietnam, Mon–Fri (two hours after the sync)
   start-analyze → install → is_holiday (is TODAY a working day?)
     → vn_stock_screen        drop illiquid symbols      → shortlist (artifact)
     → vn_stock_get_history   history of the shortlist, read from the DB → history (artifact)
@@ -49,14 +49,14 @@ Every new job follows the existing pattern: `environment: production` when it ne
 
 ### 1. Everything runs on GitHub Actions at 22:00 Vietnam time (15:00 UTC), Mon–Fri
 
-- [x] Rename `vn-stock-analysis.yml` to `vn-stock-prices-sync.yml` (it is the "VN Stock Prices Sync" workflow), no other change: cron `0 15 * * 1-5` (22:00 VN), retrieve + store only. It stays the only writer of `prices`.
+- [x] Rename `vn-stock-analysis.yml` to `vn-stock-prices-sync.yml` (it is the "VN Stock Prices Sync" workflow), only the cron changes, `0 15 * * 1-5` (22:00 VN) → `0 13 * * 1-5` (20:00 VN); retrieve + store only. It stays the only writer of `prices`.
 - [x] Add a new workflow `vn-stock-analysis.yml`, named `VN Stock Analysis`, cron `0 15 * * 1-5` (15:00 UTC = 22:00 Vietnam, same calendar day), plus `workflow_dispatch`. Same shape as the sync workflow: `start-analyze` → `install` → `is_holiday` → jobs below → `notification`. No `retrieve_prices` and no store job: it only reads `prices`. Reuse the composite actions (`pipeline-state`) and the `uv` cache rule from the README (`prune-cache: false`, only `install` saves the cache).
 - [x] The new workflow has its own `is_holiday` job (copy of the sync workflow's, same script) that checks **today** (VN): weekend or public holiday → the rest of the pipeline is skipped; working day → it proceeds.
 - [x] `scripts/vn_holiday.py` is unchanged (exit 0 = day off, 3 = working day). The new workflow's `is_holiday` only decides whether the later jobs run: day off → skipped, working day → they proceed. No `session_date` output; the session analysed is today (VN).
 - [ ] `vn_stock_screen` fails if `max(date)` in `prices` is not today (VN) (the sync failed, has not finished yet, or the source is stale), instead of reporting old data as fresh. `vn_stock_analyze` takes the same date from the screen's output.
 - [x] Nothing runs outside GitHub Actions: no local cron, no extra server.
 - [ ] Time budget: no retrieval in this workflow, so the whole run should take only a few minutes and finish well before the 09:00 open. GitHub may delay scheduled runs, so keep the margin.
-- [x] Update the README: add the new workflow to the files table and its jobs; the sync workflow's description stays at 22:00.
+- [x] Update the README: add the new workflow to the files table and its jobs; the sync workflow's description now says 20:00.
 
 ### 2. `vn_stock_screen` — drop illiquid symbols (SQL on the latest trading day)
 
