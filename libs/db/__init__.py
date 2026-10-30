@@ -17,6 +17,7 @@ def connect() -> Engine:
     """Engine for $DATABASE_URL that gives up instead of hanging on a dead host (10 s) or a held lock (60 s).
 
     NullPool: a connection is closed as soon as it is released, so none outlives its `with` block (no pool to dispose).
+    Every checkout opens a new connection: do the whole job inside one `with`, not one per row or symbol.
     With SQL_LOG_ENABLE=1, log every statement and its parameters (not `echo=True`: logxide swallows it).
     """
     options = {"connect_timeout": 10, "options": "-c statement_timeout=60000"}

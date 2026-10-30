@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     env:  # read by the seed step and by pytest
       DATABASE_URL: postgresql+psycopg://vnv:vnv@127.0.0.1:5432/vnv  # the service's CI-only credentials
-      SQL_LOG_ENABLE: "1"  # log every SQL statement (libs.db.log_sql)
+      SQL_LOG_ENABLE: "1"  # log every SQL statement (libs.db.connect)
     services:
       postgres:  # same server as docker-compose.yml; tests/conftest.py creates the vnv_test database
         image: postgres:17
