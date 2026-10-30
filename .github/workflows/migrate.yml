@@ -3,7 +3,8 @@ name: Migrate-Database
 on:
   push:
     branches: [master]
-    paths: [migrations/**]  # only when a migration is merged
+    # a migration, or what runs it (this file, the install step): merging a fix for a failed run re-runs the migration
+    paths: [migrations/**, .github/workflows/migrate.yml, .github/actions/setup-env/**]
 
 # two merges in a row must not migrate at the same time, and a running migration is never cancelled
 concurrency:
@@ -23,7 +24,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-env
         with:
-          dev: true
+          dev: 'true'
           save-cache: true
       - name: Run migrations
         run: uv run --no-sync alembic upgrade head
