@@ -2,7 +2,7 @@ name: VN Stock Prices Sync
 
 on:
   schedule:
-    # 20:15 giờ VN (UTC+7) = 13:15 UTC, thứ 2 - thứ 6. vn-stock-analysis.yml chạy lúc 22:15, sau khi giá đã được lưu
+    # 20:15 giờ VN (UTC+7) = 13:15 UTC, thứ 2 - thứ 6. vn-stock-analysis.yml chạy lúc 21:25, sau khi giá đã được lưu
     - cron: "15 13 * * 1-5"
   workflow_dispatch:
 
