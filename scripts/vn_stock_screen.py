@@ -52,9 +52,20 @@ def screen(engine: Engine, today: dt.date, log: Logger = logger) -> list[str]:
         if latest != today:
             raise RuntimeError(f"newest session in prices is {latest}, expected {today}: the sync is late or failed")
         if len(newest) > 1:  # none on the very first day
-            (_, count), (previous, before) = newest
-            if count < MIN_COVERAGE * before:
-                raise RuntimeError(f"{count} bars on {today} but {before} on {previous}: the sync is incomplete")
+            previous, before = newest[1]
+            both = session.exec(  # symbols with a bar on both days: a new listing cannot make up for a missing symbol
+                select(func.count()).select_from(
+                    select(Price.symbol)
+                    .where(Price.date.in_([today, previous]))
+                    .group_by(Price.symbol)
+                    .having(func.count() == 2)
+                    .subquery()
+                )
+            ).one()
+            if both < MIN_COVERAGE * before:
+                raise RuntimeError(
+                    f"{both} of the {before} symbols of {previous} have a bar on {today}: the sync is incomplete"
+                )
         rows = session.exec(
             select(recent.c.symbol, func.avg(recent.c.turnover))
             .where(recent.c.rank <= SESSIONS)
