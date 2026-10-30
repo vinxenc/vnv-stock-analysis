@@ -21,12 +21,16 @@ def upgrade() -> None:
     """CREATE INDEX CONCURRENTLY cannot run in a transaction: commit around it.
 
     A build that failed or timed out leaves an INVALID index of the same name, which would make a retry fail: drop it
-    first (the migration only runs again when the index is absent or invalid). No statement timeout: the build may be long.
+    first (the migration only runs again when the index is absent or invalid). No statement timeout, the build may be
+    long, but a bounded lock wait: a conflicting transaction must fail the job, not queue the later migrations.
     """
     with op.get_context().autocommit_block():
         op.execute("SET statement_timeout = 0")
+        op.execute("SET lock_timeout = '10s'")
         op.drop_index("ix_prices_date", table_name="prices", postgresql_concurrently=True, if_exists=True)
         op.create_index("ix_prices_date", "prices", ["date"], postgresql_concurrently=True)
+        op.execute("RESET statement_timeout")
+        op.execute("RESET lock_timeout")
 
 
 def downgrade() -> None:
