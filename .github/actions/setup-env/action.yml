@@ -21,4 +21,5 @@ runs:
         cache-suffix: ${{ inputs.dev == 'true' && 'dev' || 'runtime' }}  # the two installs hold different wheels
     - name: Install dependencies
       shell: bash
-      run: uv sync --locked ${{ inputs.dev == 'true' && '' || '--no-dev' }}
+      # the `&&`/`||` ternary needs a truthy middle value: `''` is falsy, so `&& '' ||` always picked `--no-dev`
+      run: uv sync --locked ${{ inputs.dev == 'true' && '--dev' || '--no-dev' }}
