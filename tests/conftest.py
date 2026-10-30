@@ -1,11 +1,10 @@
 import os
-from collections.abc import Iterator
 
 import pytest
 from sqlalchemy import Engine, text
 from sqlmodel import SQLModel, create_engine
 
-from libs.db import log_sql
+from libs.db import connect
 
 # Never the dev database `vnv`: the tests wipe their tables. `docker compose up -d --wait` provides the server.
 SERVER_URL = os.environ.get("TEST_DATABASE_SERVER", "postgresql+psycopg://vnv:vnv@127.0.0.1:5432/postgres")
@@ -29,11 +28,11 @@ def pg_url() -> str:
 
 
 @pytest.fixture
-def engine(pg_url: str) -> Iterator[Engine]:
+def engine(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Engine:
     """Fresh tables for every test."""
-    engine = log_sql(create_engine(pg_url))
+    monkeypatch.setenv("DATABASE_URL", pg_url)
+    engine = connect()
     SQLModel.metadata.drop_all(engine)
     SQLModel.metadata.create_all(engine)
-    yield engine
-    engine.dispose()
+    return engine
 
