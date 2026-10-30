@@ -1,5 +1,4 @@
 import os
-from collections.abc import Iterator
 
 import pytest
 from sqlalchemy import Engine, text
@@ -29,12 +28,11 @@ def pg_url() -> str:
 
 
 @pytest.fixture
-def engine(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[Engine]:
+def engine(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Engine:
     """Fresh tables for every test."""
     monkeypatch.setenv("DATABASE_URL", pg_url)
     engine = connect()
     SQLModel.metadata.drop_all(engine)
     SQLModel.metadata.create_all(engine)
-    yield engine
-    engine.dispose()
+    return engine
 

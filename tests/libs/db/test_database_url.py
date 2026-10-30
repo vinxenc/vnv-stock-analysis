@@ -10,20 +10,12 @@ def test_database_url_forces_psycopg3_and_keeps_the_rest(monkeypatch: pytest.Mon
     assert database_url() == "postgresql+psycopg://user:p%40ss@host:12345/db?sslmode=require"
 
 
-def test_connect_sets_timeouts(monkeypatch: pytest.MonkeyPatch, pg_url: str) -> None:
-    monkeypatch.setenv("DATABASE_URL", pg_url)
-    engine = connect()
-    with engine.connect() as connection:
-        assert connection.execute(text("SHOW statement_timeout")).scalar() == "1min"
-        assert connection.connection.dbapi_connection.info.get_parameters()["connect_timeout"] == "10"
-    engine.dispose()
-
-
-def test_connect_closes_the_connection_when_released(monkeypatch: pytest.MonkeyPatch, pg_url: str) -> None:
+def test_connect_sets_timeouts_and_closes_on_release(monkeypatch: pytest.MonkeyPatch, pg_url: str) -> None:
     monkeypatch.setenv("DATABASE_URL", pg_url)
     with connect().connect() as connection:
         raw = connection.connection.dbapi_connection
-        assert not raw.closed
+        assert connection.execute(text("SHOW statement_timeout")).scalar() == "1min"
+        assert raw.info.get_parameters()["connect_timeout"] == "10"
     assert raw.closed  # NullPool: nothing is kept open for later
 
 
