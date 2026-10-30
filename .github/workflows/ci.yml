@@ -20,13 +20,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: ./.github/actions/setup-env
         with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-          prune-cache: false  # pruning drops the pre-built wheels, leaving an empty cache
-      - name: Install dependencies
-        run: uv sync --locked
+          dev: true
+          save-cache: true
 
   lint:
     name: Ruff check
@@ -36,14 +33,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: ./.github/actions/setup-env
         with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-          save-cache: false
-          prune-cache: false  # part of the cache key: must match the install job to hit its cache
-      - name: Install dependencies (from cache)
-        run: uv sync --locked
+          dev: true
       - name: Ruff check
         run: uv run ruff check libs scripts tests
 
@@ -55,7 +47,7 @@ jobs:
       DATABASE_URL: postgresql+psycopg://vnv:vnv@127.0.0.1:5432/vnv  # the service's CI-only credentials
       SQL_LOG_ENABLE: "1"  # log every SQL statement (libs.db.connect)
     services:
-      postgres:  # same server as docker-compose.yml; tests/conftest.py creates the vnv_test database
+      postgres:  # same server as docker-compose.yml; tests/conftest.py recreates the vnv_test database and runs the migrations on it
         image: postgres:17
         env:
           POSTGRES_USER: vnv
@@ -69,18 +61,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: ./.github/actions/setup-env
         with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-          save-cache: false
-          prune-cache: false  # part of the cache key: must match the install job to hit its cache
-      - name: Install dependencies (from cache)
-        run: uv sync --locked
-      - name: Migrate and seed the database with real prices
+          dev: true
+      - name: Migrate the database (the real migrations) and check them against the models
         run: |
           uv run alembic upgrade head
-          uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json
+          uv run alembic check
+      - name: Seed the database with real prices
+        run: uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json
       - name: Unit tests (coverage gate from pyproject.toml)
         run: uv run pytest -s  # -s: pytest would hide the SQL log of passing tests
 
@@ -92,14 +81,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: ./.github/actions/setup-env
         with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-          save-cache: false
-          prune-cache: false  # part of the cache key: must match the install job to hit its cache
-      - name: Install dependencies (from cache)
-        run: uv sync --locked
+          dev: true
       - name: Export locked runtime dependencies
         run: uv export --locked --no-dev --no-emit-project --no-hashes --quiet -o requirements-audit.txt
       - name: pip-audit

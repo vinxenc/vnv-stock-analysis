@@ -3,7 +3,9 @@ from datetime import datetime
 
 import niquests
 
-from .base import VN_TZ, Price, PriceNotFoundError, PriceSource, http_get_json, validate_symbol
+from libs.constants import VN_TZ
+
+from .base import Price, PriceNotFoundError, PriceSource, http_get_json, validate_symbol
 
 
 class DNSE(PriceSource):

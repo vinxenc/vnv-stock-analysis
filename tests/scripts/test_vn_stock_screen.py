@@ -9,11 +9,12 @@ import pytest
 from sqlalchemy import Engine
 from sqlmodel import Session
 
+from libs.constants import NO_DATA
 from libs.db import connect
 from libs.db.models import Price
 from scripts import vn_stock_screen
 from scripts.vn_stock_latest_price_retrieval import read_symbols
-from scripts.vn_stock_screen import MIN_TURNOVER, NO_DATA, SESSIONS, main, screen
+from scripts.vn_stock_screen import MIN_TURNOVER, SESSIONS, main, screen
 
 TODAY = dt.date(2026, 10, 23)  # a fixed day in the past, so main()'s default (the real today) never equals it
 
@@ -66,9 +67,10 @@ def test_screen_averages_the_last_20_sessions(engine: Engine) -> None:
 
 
 def test_screen_needs_a_row_today(engine: Engine) -> None:
-    yesterday = TODAY - dt.timedelta(days=1)
-    store(engine, ("AAA", 10, 3_000_000, TODAY), ("BBB", 10, 3_000_000, yesterday))  # BBB has no bar today
-    assert screen(engine, TODAY) == ["AAA"]
+    others = [f"S{i:02d}" for i in range(9)]  # 9 of the 10 symbols of yesterday are still there: complete enough
+    store(engine, ("BBB", 10, 3_000_000, YESTERDAY), *[(code, 10, 3_000_000, YESTERDAY) for code in others])
+    store(engine, ("AAA", 10, 3_000_000, TODAY), *[(code, 10, 3_000_000, TODAY) for code in others])  # BBB has no bar
+    assert screen(engine, TODAY) == ["AAA", *others]
 
 
 @pytest.mark.parametrize("stored_date", [TODAY - dt.timedelta(days=1), TODAY + dt.timedelta(days=1)])
@@ -76,6 +78,27 @@ def test_screen_fails_when_newest_session_is_not_today(engine: Engine, stored_da
     store(engine, ("AAA", 10, 3_000_000, stored_date))
     with pytest.raises(RuntimeError, match="late or failed"):
         screen(engine, TODAY)
+
+
+def test_screen_fails_when_a_partial_sync_stored_few_symbols_today(engine: Engine) -> None:
+    store(engine, *[(f"S{i:02d}", 10, 3_000_000, YESTERDAY) for i in range(10)])
+    store(engine, *[(f"S{i:02d}", 10, 3_000_000, TODAY) for i in range(8)])  # 8 of 10: under 90%
+    with pytest.raises(RuntimeError, match="sync is incomplete"):
+        screen(engine, TODAY)
+
+
+def test_screen_a_new_symbol_does_not_make_up_for_a_missing_one(engine: Engine) -> None:
+    store(engine, *[(f"S{i:02d}", 10, 3_000_000, YESTERDAY) for i in range(10)])
+    store(engine, *[(f"S{i:02d}", 10, 3_000_000, TODAY) for i in range(8)])
+    store(engine, ("NEW1", 10, 3_000_000, TODAY), ("NEW2", 10, 3_000_000, TODAY))  # 10 bars today, but only 8 of 10
+    with pytest.raises(RuntimeError, match="sync"):
+        screen(engine, TODAY)
+
+
+def test_screen_accepts_a_sync_that_stored_enough_symbols(engine: Engine) -> None:
+    store(engine, *[(f"S{i:02d}", 10, 3_000_000, YESTERDAY) for i in range(10)])
+    store(engine, *[(f"S{i:02d}", 10, 3_000_000, TODAY) for i in range(9)])  # 9 of 10: exactly 90%
+    assert len(screen(engine, TODAY)) == 9
 
 
 def test_screen_fails_on_empty_table(engine: Engine) -> None:

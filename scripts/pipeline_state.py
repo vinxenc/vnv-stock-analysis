@@ -5,6 +5,7 @@ JOB_STATUS is `${{ job.status }}`: success -> SUCCESS_LEVEL + SUCCESS_MESSAGE, c
 (failure) -> error + FAILURE_MESSAGE. scripts/notification.py reads these files.
 Standard library only: the job may be writing this because `uv sync` itself failed.
 """
+
 import argparse
 import json
 import sys

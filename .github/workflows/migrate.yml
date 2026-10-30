@@ -21,13 +21,10 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: ./.github/actions/setup-env
         with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-          prune-cache: false  # pruning drops the pre-built wheels, leaving an empty cache
-      - name: Install dependencies (alembic is a dev dependency)
-        run: uv sync --locked
+          dev: true
+          save-cache: true
       - name: Run migrations
         run: uv run --no-sync alembic upgrade head
         env:

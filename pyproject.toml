@@ -36,6 +36,9 @@ branch = true
 [tool.ruff]
 line-length = 120
 
+[tool.ruff.format]
+exclude = ["migrations/versions/0001_*.py"]  # a migration that already ran is never edited, not even to reformat it
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ANN", "T20"]  # T20: no print(); use the Logger (see README, Code rules)
 

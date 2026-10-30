@@ -5,6 +5,7 @@ Default: out/vn_stock_latest_prices.json
 A row with the same (symbol, date) is overwritten, so running it twice stores the same data once.
 Exit 0 = rows stored, 4 = the file holds no price (nothing stored), anything else = crash.
 """
+
 import json
 import sys
 from pathlib import Path
@@ -12,11 +13,11 @@ from pathlib import Path
 from sqlalchemy import Engine
 from sqlalchemy.dialects.postgresql import insert
 
+from libs.constants import NO_DATA
 from libs.db import connect
 from libs.db.models import Price
 from libs.logger import Logger, LogxideLogger
 
-NO_DATA = 4  # same meaning as in the retrieval script; the workflow does not map it, any non-zero fails the job
 logger = LogxideLogger("vn_stock_daily_price_store")
 
 

@@ -1,8 +1,10 @@
 import os
 
 import pytest
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import Engine, text
-from sqlmodel import SQLModel, create_engine
+from sqlmodel import create_engine
 
 from libs.db import connect
 
@@ -13,26 +15,36 @@ TEST_DB = "vnv_test"
 
 @pytest.fixture(scope="session")
 def pg_url() -> str:
-    """URL of the throwaway test database, created on first use."""
+    """URL of the throwaway test database, dropped and recreated at the start of every session, then migrated with the
+    real migrations (not `create_all`), so the tests run on the schema production gets."""
     server = create_engine(SERVER_URL, isolation_level="AUTOCOMMIT")
     try:
         with server.connect() as connection:
-            exists = connection.execute(text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": TEST_DB})
-            if not exists.scalar():
-                connection.execute(text(f"CREATE DATABASE {TEST_DB}"))
+            connection.execute(text(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE)"))
+            connection.execute(text(f"CREATE DATABASE {TEST_DB}"))
     except Exception as error:
         pytest.fail(f"Postgres is not reachable ({type(error).__name__}); run `docker compose up -d --wait`")
     finally:
         server.dispose()
-    return server.url.set(database=TEST_DB).render_as_string(hide_password=False)
+    url = server.url.set(database=TEST_DB).render_as_string(hide_password=False)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("DATABASE_URL", url)  # migrations/env.py reads the database from it
+        command.upgrade(Config("alembic.ini"), "head")  # pytest runs from the repository root
+    return url
+
+
+@pytest.fixture
+def alembic_config(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Config:
+    """Alembic config for the test database."""
+    monkeypatch.setenv("DATABASE_URL", pg_url)
+    return Config("alembic.ini")  # pytest runs from the repository root
 
 
 @pytest.fixture
 def engine(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Engine:
-    """Fresh tables for every test."""
+    """Empty `prices` for every test."""
     monkeypatch.setenv("DATABASE_URL", pg_url)
     engine = connect()
-    SQLModel.metadata.drop_all(engine)
-    SQLModel.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("TRUNCATE prices"))
     return engine
-

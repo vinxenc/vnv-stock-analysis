@@ -8,25 +8,27 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 |---|---|
 | `libs/prices/` | `DNSE`, `VPS`, `VNDirect` classes. Each has `get_latest_price(symbol) -> Price`. `Price` is a pydantic model (symbol, source, date, open, high, low, close, volume; thousand VND). |
 | `libs/logger/` | `Logger` interface (`debug/info/warning/error`), `LogxideLogger` (adapter over [logxide](https://github.com/Indosaram/logxide), logs to stderr) and `GithubActionsLogger` (writes GitHub Actions annotations to stdout). |
-| `scripts/vn_stock_latest_price_retrieval.py` | Fetches the latest price of every symbol in `data/hose_symbols.csv` (DNSE → VPS → VNDirect, 1 retry per source, 1 s between symbols) and writes one JSON array. A symbol that fails everywhere is skipped; exit 4 if none was fetched. |
+| `scripts/vn_stock_latest_price_retrieval.py` | Fetches the latest price of every symbol in `data/hose_symbols.csv` (DNSE → VPS → VNDirect, 1 retry per source, 1 s between symbols) and writes one JSON array. A symbol that fails everywhere is skipped. Exit 4 if none was fetched or fewer than 90% were (`MIN_COVERAGE`): no file is written, so a partial outage never reaches the database. |
 | `libs/db/` | `models.py`: `Price`, the `prices` table (primary key `symbol` + `date`), also the model the price sources return (`libs.prices.Price` reuses it). Create it with `Price.model_validate(data)`: SQLModel skips validation in `Price(**data)`. |
 | `scripts/vn_stock_daily_price_store.py` | Reads the JSON above and upserts it into the `prices` table (`ON CONFLICT (symbol, date) DO UPDATE`, one transaction). Needs `$DATABASE_URL`. Exit 4 if the file holds no price. A repeated (symbol, date) in the file: the last row wins. 10 s connect and 60 s statement timeouts. |
-| `scripts/vn_stock_screen.py` | Reads `prices` and writes `out/liquid_symbols.csv` (a `code` column): the symbols that traded today (Vietnam time) and whose average turnover (`close × volume`) over their last 20 sessions is at least 20 billion VND (a symbol with fewer rows is averaged over the rows it has). Needs `$DATABASE_URL`. Crashes (exit 1) when the newest session in `prices` is not today, so a late or failed sync is never reported as fresh data; exit 4 if nobody is liquid enough. |
-| `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. |
+| `scripts/vn_stock_screen.py` | Reads `prices` and writes `out/liquid_symbols.csv` (a `code` column): the symbols that traded today (Vietnam time) and whose average turnover (`close × volume`) over their last 20 sessions is at least 20 billion VND (a symbol with fewer rows is averaged over the rows it has). Needs `$DATABASE_URL`. Crashes (exit 1) when the newest session in `prices` is not today, so a late or failed sync is never reported as fresh data; Also crashes when fewer than 90% of the previous session's symbols have a bar today (a partial sync would silently shrink the shortlist). Exit 4 if nobody is liquid enough. |
+| `libs/constants.py` | Shared by the libs and scripts: `VN_TZ`, the exit code `NO_DATA` (4), `MIN_COVERAGE` (0.9). |
+| `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. `0001` creates `prices`, `0002` adds the index on `prices.date` (`max(date)` cannot use the primary key). A migration that already ran is never edited, not even reformatted (`ruff format` skips `0001`). |
 | `docker-compose.yml` | Local Postgres 17 (user, password and database all `vnv`). |
 | `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`. Needs the `DATABASE_URL` secret of the `production` environment. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
 | `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
 | `scripts/pipeline_state.py`, `scripts/notification.py`, `.github/actions/pipeline-state/` | Pipeline state files and the notification that reads them (see below). |
-| `.github/workflows/vn-stock-prices-sync.yml` | `VN Stock Prices Sync`: weekday cron (20:00 Vietnam time). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
-| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (22:00 Vietnam time) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync` two hours earlier), never fetches. Jobs so far: `start-analyze` → `install` → `is_holiday` (a day off skips the later jobs) → `vn_stock_screen` (uploads the `vn-stock-screen` artifact, with the `production` environment's `DATABASE_URL` secret), then `notification`. The history and analyze jobs are planned in `docs/plans/phase-1-sql-screens.md`. |
+| `.github/actions/setup-env/`, `.github/actions/check-holiday/` | Composite actions shared by all workflows: install uv with the cache settings and run `uv sync --locked` (see the uv cache rule below); run `scripts/vn_holiday.py` and output `holiday`. |
+| `.github/workflows/vn-stock-prices-sync.yml` | `VN Stock Prices Sync`: weekday cron (20:15 Vietnam time; not on the hour, scheduled runs on the hour are delayed most). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
+| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (22:15 Vietnam time) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync` two hours earlier), never fetches. Jobs so far: `start-analyze` → `install` → `is_holiday` (a day off skips the later jobs) → `vn_stock_screen` (uploads the `vn-stock-screen` artifact, with the `production` environment's `DATABASE_URL` secret), then `notification`. The history and analyze jobs are planned in `docs/plans/phase-1-sql-screens.md`. |
 
 The endpoints are undocumented and may change or block without notice.
 
 ## Develop locally
 
-Needs [uv](https://docs.astral.sh/uv/) and [lefthook](https://lefthook.dev/) (`brew install uv lefthook`).
+Needs [uv](https://docs.astral.sh/uv/) and [lefthook](https://lefthook.dev/) (`brew install uv lefthook`). `.python-version` pins Python 3.12, the version CI and the pipelines run, so `uv sync` builds the same environment everywhere.
 
 ```bash
 uv sync                  # create .venv and install deps (incl. dev tools)
@@ -60,6 +62,7 @@ In production the `Migrate-Database` workflow applies the migrations on every pu
 | `uv run pytest` | Unit tests (no network, but **needs the local Postgres**, see below) with coverage on `libs/` and `scripts/`. Fails if coverage is under 95%. |
 | `uv run pytest -m live --no-cov` | Live smoke tests against the real endpoints. Not run by default. |
 | `uv run ruff check libs scripts tests` | Lint. Add `--fix` to auto-fix. |
+| `uv run ruff format libs scripts tests` | Format. The pre-commit hook does this for the staged files; CI does not check formatting. |
 | `lefthook run pre-commit` | Run the pre-commit checks by hand. |
 | `uv run python -m scripts.vn_stock_daily_price_store [input_json]` | Upsert `out/vn_stock_latest_prices.json` into the database named by `$DATABASE_URL`. |
 | `uv run python -m scripts.vn_stock_screen [output_csv]` | Write the liquid symbols (20-session average turnover) to `out/liquid_symbols.csv` (needs `$DATABASE_URL`). |
@@ -95,13 +98,13 @@ docker compose up -d --wait   # start Postgres on 127.0.0.1:5432 (skip if it is 
 uv run pytest                 # unit tests + coverage gate
 ```
 
-- `tests/conftest.py` creates a separate `vnv_test` database on first use and drops and recreates the tables before every test, so your dev database `vnv` is never touched.
+- `tests/conftest.py` drops and recreates a separate `vnv_test` database at the start of every run, applies the real Alembic migrations to it (not `create_all`), and truncates `prices` before every test, so the tests run on the schema production gets and your dev database `vnv` is never touched. `tests/migrations/` also runs downgrade to nothing, upgrade, and `alembic check`.
 - No Postgres running: the DB tests fail with "Postgres is not reachable; run `docker compose up -d --wait`".
 - Different server: set `TEST_DATABASE_SERVER` to a `postgresql+psycopg://user:pass@host:port/postgres` URL (a role that can `CREATE DATABASE`).
 - The same applies to the pre-commit hook, which runs `pytest`: start Postgres first.
 - To try the real script against your dev database: `export DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv`, `uv run alembic upgrade head`, then `uv run python -m scripts.vn_stock_daily_price_store`.
 
-The pre-commit hook (`lefthook.yml`) runs the lint, then the unit tests with the coverage gate. A commit is blocked if either fails.
+The pre-commit hook (`lefthook.yml`) formats the staged Python files (and re-stages them), runs the lint, then the unit tests with the coverage gate. A commit is blocked if the lint or the tests fail.
 
 Settings for pytest, coverage and ruff live in `pyproject.toml`.
 
@@ -111,7 +114,7 @@ Set `SQL_LOG_ENABLE=1` to log every SQL statement with its parameters (through t
 
 #### Seed the database
 
-`tests/data/prices_hpg_aam.json` holds real history of two stocks (HPG, very liquid; AAM, almost untraded). CI migrates and seeds the job's Postgres service with it before `pytest`, and `test_screen_on_the_seeded_database` checks the screen against that data. The same locally (that test is skipped while `$DATABASE_URL` is unset):
+`tests/data/prices_hpg_aam.json` holds real history of two stocks (HPG, very liquid; AAM, almost untraded). CI runs the real migrations on the job's Postgres service, checks them against the models (`alembic check`), then seeds it with it before `pytest`, and `test_screen_on_the_seeded_database` checks the screen against that data. The same locally (that test is skipped while `$DATABASE_URL` is unset):
 
 ```bash
 export DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv
@@ -128,12 +131,12 @@ uv run pytest
 |---|---|
 | `install` | `uv sync --locked`, and saves the uv cache (keyed on `uv.lock`) |
 | `lint` | `ruff check libs scripts tests` |
-| `test` | Migrates and seeds the Postgres 17 service container (same credentials as `docker-compose.yml`) with `tests/data/prices_hpg_aam.json`, then `pytest` with the 95% coverage gate |
+| `test` | On the Postgres 17 service container (same credentials as `docker-compose.yml`): `alembic upgrade head`, `alembic check`, seeds `tests/data/prices_hpg_aam.json`, then `pytest` with the 95% coverage gate (which itself migrates a fresh `vnv_test` database) |
 | `audit` | `pip-audit` on the locked runtime dependencies |
 
 Later jobs restore the cache from `install`, so their own `uv sync --locked` only has to link the packages. Commit `uv.lock` whenever you change dependencies, or `--locked` makes CI fail.
 
-**uv cache rule** (`ci.yml`, `vn-stock-prices-sync.yml` and `vn-stock-analysis.yml`): every `astral-sh/setup-uv` step sets `prune-cache: false`, and only the `install` job saves the cache. By default `setup-uv` runs `uv cache prune --ci` before saving, which deletes pre-built wheels; all our dependencies are wheels, so the saved cache was about 1 KB and every job downloaded the packages again. `prune-cache` is part of the cache key (`...-pruned-...` or not), so a job that restores must use the same value as `install`, or it looks up a different cache and misses. Every job except `install` also sets `save-cache: false`, restores the cache, and runs its own `uv sync --locked` to link the packages. The two pipeline workflows install with `--no-dev` (fewer wheels), so their `setup-uv` steps also set `cache-suffix: runtime`; otherwise they and `ci.yml` share one cache key. They share the `runtime` cache with each other, which is fine: both install the same set. A cache entry can't be overwritten, so if the runtime cache is saved first, `ci.yml` restores it without the dev wheels (pytest, ruff, pip-audit) and downloads them on every run. The reverse is harmless: a full cache saved first also contains the runtime wheels.
+**uv cache rule** (`ci.yml`, `migrate.yml`, `vn-stock-prices-sync.yml` and `vn-stock-analysis.yml`): every job installs through the `.github/actions/setup-env` composite action, whose `astral-sh/setup-uv` step sets `prune-cache: false`, and only the `install` job saves the cache (`save-cache: true`; the action's default is `false`). By default `setup-uv` runs `uv cache prune --ci` before saving, which deletes pre-built wheels; all our dependencies are wheels, so the saved cache was about 1 KB and every job downloaded the packages again. `prune-cache` is part of the cache key (`...-pruned-...` or not), so a job that restores must use the same value as `install`, or it looks up a different cache and misses. Every job except `install` restores the cache, and runs its own `uv sync --locked` to link the packages. The two pipeline workflows install with `--no-dev` (fewer wheels), so the action sets `cache-suffix: runtime` for them and `dev` when called with `dev: true` (`ci.yml`, `migrate.yml`); otherwise they would share one cache key. They share the `runtime` cache with each other, which is fine: both install the same set. A cache entry can't be overwritten, so if the runtime cache is saved first, `ci.yml` restores it without the dev wheels (pytest, ruff, pip-audit) and downloads them on every run. The reverse is harmless: a full cache saved first also contains the runtime wheels.
 
 ### Code rules
 
@@ -146,10 +149,12 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 ### Layout
 
 ```
+libs/constants.py   VN_TZ, exit codes, MIN_COVERAGE
 libs/prices/   base.py (Price, PriceSource, PriceNotFoundError, helpers), dnse.py, vps.py, vndirect.py
 tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
 libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_actions.py (GithubActionsLogger, workflow commands on stdout)
 tests/libs/logger/   test_logxide.py, test_github_actions.py
+tests/migrations/   test_migrations.py (downgrade, upgrade, alembic check)
 scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, vn_stock_screen.py, pipeline_state.py, notification.py
 tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`), data/prices_hpg_aam.json (real DNSE history of HPG and AAM, 2026-09-15..2026-10-29, the seed)
 tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_vn_stock_screen.py, test_pipeline_state.py, test_notification.py
@@ -160,3 +165,8 @@ Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other
 **Adding a price source:** before it is used, compare it with the existing sources (DNSE, VPS, VNDirect) on the same symbols and sessions: `open`/`high`/`low`/`close` (adjusted, thousand VND) and `volume` (matched shares, put-through trades excluded) must be identical, because `prices` mixes whichever source answered and `scripts/vn_stock_screen.py` multiplies `close × volume`. Checked on 2026-10-29 for HPG, VCB and AAM over 8 sessions: the three sources were identical.
 
 To add a source, subclass `PriceSource` in `libs/prices/`, export it in `__init__.py`, and add a matching `tests/libs/prices/test_<name>.py`.
+
+## Future work
+
+- [ ] **Keep the dependencies and actions current.** Add `.github/dependabot.yml` (the `uv` and `github-actions` ecosystems): the actions are pinned by SHA, so nothing updates them today. Run `pip-audit` on a weekly schedule too: it only runs on pull requests, so a new CVE in an unchanged `uv.lock` is never reported.
+- [ ] **Batch the upsert before the history backfill.** `store()` in `scripts/vn_stock_daily_price_store.py` sends every row in one `INSERT ... VALUES`, and Postgres allows at most 65535 bind parameters per statement (about 8000 rows of 8 columns). A backfill of hundreds of thousands of rows fails; pass the rows as a list of dicts to `connection.execute(statement, rows)` (SQLAlchemy batches it) or chunk them.

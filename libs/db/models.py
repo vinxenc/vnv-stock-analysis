@@ -16,7 +16,7 @@ class Price(SQLModel, table=True):
     model_config = ConfigDict(allow_inf_nan=False)
 
     symbol: str = Field(primary_key=True)
-    date: dt.date = Field(primary_key=True)
+    date: dt.date = Field(primary_key=True, index=True)  # the primary key starts with symbol: max(date) needs its own
     source: str
     unit: str = "thousand VND"
     open: float = Field(gt=0)

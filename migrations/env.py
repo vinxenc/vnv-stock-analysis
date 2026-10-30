@@ -1,4 +1,5 @@
 """Alembic env: online mode only, database from $DATABASE_URL (postgres:// or postgresql+psycopg://user:pass@host/db)."""
+
 from alembic import context
 from sqlmodel import SQLModel
 

@@ -1,5 +1,9 @@
 pre-commit:
   commands:
+    format:
+      glob: "*.py"
+      run: uv run ruff format --force-exclude {staged_files}  # --force-exclude: honour pyproject's exclude for a named file
+      stage_fixed: true
     lint:
       run: uv run ruff check libs scripts tests
     test:

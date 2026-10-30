@@ -1,0 +1,24 @@
+name: Set up the Python environment
+description: >-
+  Install uv with the repository's cache settings (README, "uv cache rule") and run `uv sync --locked`.
+  Call it right after `actions/checkout`.
+inputs:
+  dev:
+    description: "'true' to install the dev dependencies too (ci.yml); the pipeline workflows only need the runtime ones"
+    default: "false"
+  save-cache:
+    description: "'true' in the one job that saves the uv cache (the workflow's `install` job); the others only restore it"
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+        save-cache: ${{ inputs.save-cache }}
+        prune-cache: false  # pruning drops the pre-built wheels, leaving an empty cache; part of the cache key
+        cache-suffix: ${{ inputs.dev == 'true' && 'dev' || 'runtime' }}  # the two installs hold different wheels
+    - name: Install dependencies
+      shell: bash
+      run: uv sync --locked ${{ inputs.dev == 'true' && '' || '--no-dev' }}
