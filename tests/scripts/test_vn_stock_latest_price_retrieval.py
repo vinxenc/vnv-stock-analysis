@@ -7,6 +7,7 @@ import pytest
 
 from libs.logger import Logger
 from libs.prices import Price, PriceNotFoundError, PriceSource
+from scripts import vn_stock_latest_price_retrieval as retrieval
 from scripts.vn_stock_latest_price_retrieval import NO_DATA, fetch, get_price, main, read_symbols
 
 
@@ -105,7 +106,13 @@ def test_all_sources_fail() -> None:
     assert sum(len(source.calls) for source in sources) == 6
 
 
-def test_main_skips_failed_symbol(tmp_path: Path) -> None:
+def test_an_unexpected_error_in_a_source_falls_back_to_the_next() -> None:
+    first, second = FakeSource("A", AttributeError("1"), AttributeError("2")), FakeSource("B")
+    assert get_price("FPT", [first, second]).source == "B"
+
+
+def test_main_skips_failed_symbol(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(retrieval, "MIN_COVERAGE", 0.5)  # 2 of 3 symbols
     csv_path, out = write_csv(tmp_path / "s.csv", "AAA", "BBB", "CCC"), tmp_path / "sub" / "out.json"
     first = FakeSource("A", None, PriceNotFoundError("x"), None)
     second = FakeSource("B", PriceNotFoundError("y"))
@@ -125,6 +132,26 @@ def test_main_skips_failed_symbol(tmp_path: Path) -> None:
     assert log.records[1][0] == "warning"
     assert log.records[1][1].startswith("[2/3] BBB skipped")
     assert log.records[-1] == ("info", "fetched 2, skipped 1: BBB")
+
+
+def test_main_too_few_symbols_writes_nothing(tmp_path: Path) -> None:
+    """A partial outage must not pass: 1 of 3 fetched is under the default 90%."""
+    out = tmp_path / "out.json"
+    out.write_text("[]", encoding="utf-8")  # an earlier run's file must go too
+    csv_path = write_csv(tmp_path / "s.csv", "AAA", "BBB", "CCC")
+    log = FakeLogger()
+    source = FakeSource("A", None, PriceNotFoundError("x"), PriceNotFoundError("y"))
+    assert main(csv_path, out, [source], sleep=lambda _: None, log=log) == NO_DATA
+    assert log.records[-1] == ("error", "fetched only 1 of 3 symbols (minimum 90%), nothing written")
+    assert not out.exists()
+
+
+def test_main_enough_symbols_is_written(tmp_path: Path) -> None:
+    out = tmp_path / "out.json"
+    csv_path = write_csv(tmp_path / "s.csv", *[f"A{i}" for i in range(10)])
+    source = FakeSource("A", *[None] * 9, PriceNotFoundError("x"))  # 9 of 10 = exactly 90%
+    assert main(csv_path, out, [source], sleep=lambda _: None) == 0
+    assert len(json.loads(out.read_text(encoding="utf-8"))) == 9
 
 
 def test_main_no_data_writes_nothing(tmp_path: Path) -> None:

@@ -34,14 +34,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: ./.github/actions/setup-env
         with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-          prune-cache: false  # pruning drops the pre-built wheels, leaving an empty cache
-          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
-      - name: Install dependencies
-        run: uv sync --locked --no-dev
+          save-cache: true
       - if: always()
         uses: ./.github/actions/pipeline-state
         with:
@@ -59,28 +54,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-          save-cache: false
-          prune-cache: false  # part of the cache key: must match the install job to hit its cache
-          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
-      - name: Install dependencies (from cache)
-        run: uv sync --locked --no-dev
-      - name: Check today (Vietnam time)
+      - uses: ./.github/actions/setup-env
+      - uses: ./.github/actions/check-holiday
         id: check
-        # the script exits 0 on a day off, 3 on a working day; any other code is a failed check and fails the job
-        run: |
-          rc=0
-          uv run --no-sync python -m scripts.vn_holiday || rc=$?
-          case "$rc" in
-            0)
-              echo "holiday=true" >> "$GITHUB_OUTPUT"
-              ;;
-            3) echo "holiday=false" >> "$GITHUB_OUTPUT" ;;
-            *) exit "$rc" ;;
-          esac
       - if: always()
         uses: ./.github/actions/pipeline-state
         with:
@@ -100,17 +76,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-          save-cache: false
-          prune-cache: false  # part of the cache key: must match the install job to hit its cache
-          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
-      - name: Install dependencies (from cache)
-        run: uv sync --locked --no-dev
+      - uses: ./.github/actions/setup-env
       - name: Retrieve latest prices
-        # exits 0 with a JSON file, 4 when no symbol could be fetched; any non-zero code fails the job
+        # exits 0 with a JSON file, 4 when no symbol (or under 90%) could be fetched; any non-zero code fails the job
         run: uv run --no-sync python -m scripts.vn_stock_latest_price_retrieval
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -136,15 +104,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-        with:
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-          save-cache: false
-          prune-cache: false  # part of the cache key: must match the install job to hit its cache
-          cache-suffix: runtime  # --no-dev installs fewer wheels: keep a separate cache from ci.yml's full install
-      - name: Install dependencies (from cache)
-        run: uv sync --locked --no-dev
+      - uses: ./.github/actions/setup-env
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: vn-stock-latest-prices

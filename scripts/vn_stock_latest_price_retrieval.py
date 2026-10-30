@@ -3,8 +3,10 @@
 Usage: uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]
 Defaults: data/hose_symbols.csv  out/vn_stock_latest_prices.json
 Sources per symbol: DNSE -> VPS -> VNDirect, 1 retry each (tenacity). A symbol that fails everywhere is skipped.
-Exit 0 = at least one price written, 4 = no price at all (no file written), anything else = crash.
+Exit 0 = prices written, 4 = no price at all or fewer than MIN_COVERAGE of the symbols (no file written), anything
+else = crash.
 """
+
 import csv
 import json
 import sys
@@ -14,11 +16,11 @@ from pathlib import Path
 
 from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_fixed
 
+from libs.constants import MIN_COVERAGE, NO_DATA
 from libs.logger import Logger, LogxideLogger
 from libs.prices import DNSE, VPS, Price, PriceNotFoundError, PriceSource, VNDirect
 from libs.prices.base import validate_symbol
 
-NO_DATA = 4  # not 1: Python exits 1 on an uncaught error, which must not read as "no data"
 SOURCES = (DNSE(), VPS(), VNDirect())
 logger = LogxideLogger("vn_stock_latest_price_retrieval")
 
@@ -75,9 +77,17 @@ def main(
             prices.append(price)
             log.info("[%d/%d] %s ok (%s)", index, len(symbols), symbol, price.source)
     log.info("fetched %d, skipped %d: %s", len(prices), len(skipped), " ".join(skipped))
+    output_json.unlink(missing_ok=True)  # never leave an earlier run's file looking like today's result
     if not prices:
         log.error("no price fetched, nothing written")
-        output_json.unlink(missing_ok=True)  # never leave an earlier run's file looking like today's result
+        return NO_DATA
+    if len(prices) < MIN_COVERAGE * len(symbols):
+        log.error(
+            "fetched only %d of %d symbols (minimum %.0f%%), nothing written",
+            len(prices),
+            len(symbols),
+            MIN_COVERAGE * 100,
+        )
         return NO_DATA
     output_json.parent.mkdir(parents=True, exist_ok=True)
     rows = [price.model_dump(mode="json") for price in prices]

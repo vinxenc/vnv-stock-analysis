@@ -11,6 +11,7 @@ is already `warning` or `error`.
 Standard library plus libs.logger.GithubActionsLogger only: it must run even when `uv sync` failed.
 A file that cannot be read or has an unknown level is logged as an error and makes the exit code 1.
 """
+
 import json
 import os
 import sys

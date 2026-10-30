@@ -4,9 +4,11 @@ least 20 billion VND per session (today = Vietnam time).
 Usage: DATABASE_URL=... uv run python -m scripts.vn_stock_screen [output_csv]
 Default: out/liquid_symbols.csv (a `code` column, same shape as data/hose_symbols.csv)
 Fails (crash, exit 1) unless the newest session in `prices` is today: the sync has not finished or failed, and old data
-must not be reported as fresh.
+must not be reported as fresh. Also fails when fewer than MIN_COVERAGE of the previous session's symbols have a bar
+today: a partial sync would silently shrink the shortlist.
 Exit 0 = shortlist written, 4 = nobody is liquid enough (nothing written), anything else = crash.
 """
+
 import csv
 import datetime as dt
 import sys
@@ -15,12 +17,11 @@ from pathlib import Path
 from sqlalchemy import Engine, case, func
 from sqlmodel import Session, select
 
+from libs.constants import MIN_COVERAGE, NO_DATA, VN_TZ
 from libs.db import connect
 from libs.db.models import Price
 from libs.logger import Logger, LogxideLogger
-from scripts.vn_holiday import VN_TZ
 
-NO_DATA = 4  # same meaning as in the other scripts; the workflow does not map it, any non-zero fails the job
 MIN_TURNOVER = 20_000_000  # thousand VND (prices are in thousand VND) = 20 billion VND per session
 SESSIONS = 20  # rows, not calendar days (holidays); a symbol with fewer rows is averaged over the rows it has
 logger = LogxideLogger("vn_stock_screen")
@@ -44,9 +45,16 @@ def screen(engine: Engine, today: dt.date, log: Logger = logger) -> list[str]:
         .subquery()
     )
     with Session(engine) as session:
-        latest = session.exec(select(func.max(Price.date))).one()
+        newest = session.exec(  # the last two sessions with their number of bars
+            select(Price.date, func.count()).group_by(Price.date).order_by(Price.date.desc()).limit(2)
+        ).all()
+        latest = newest[0][0] if newest else None
         if latest != today:
             raise RuntimeError(f"newest session in prices is {latest}, expected {today}: the sync is late or failed")
+        if len(newest) > 1:  # none on the very first day
+            (_, count), (previous, before) = newest
+            if count < MIN_COVERAGE * before:
+                raise RuntimeError(f"{count} bars on {today} but {before} on {previous}: the sync is incomplete")
         rows = session.exec(
             select(recent.c.symbol, func.avg(recent.c.turnover))
             .where(recent.c.rank <= SESSIONS)

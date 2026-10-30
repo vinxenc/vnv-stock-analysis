@@ -1,0 +1,22 @@
+name: Check holiday
+description: >-
+  Is today (Vietnam time) a weekend or a public holiday? Runs scripts/vn_holiday.py, which exits 0 on a day off and 3 on a
+  working day; any other exit code fails the step. Needs the dependencies installed (setup-env).
+outputs:
+  holiday:
+    description: "'true' on a day off, 'false' on a working day"
+    value: ${{ steps.check.outputs.holiday }}
+runs:
+  using: composite
+  steps:
+    - name: Check today (Vietnam time)
+      id: check
+      shell: bash
+      run: |
+        rc=0
+        uv run --no-sync python -m scripts.vn_holiday || rc=$?
+        case "$rc" in
+          0) echo "holiday=true" >> "$GITHUB_OUTPUT" ;;
+          3) echo "holiday=false" >> "$GITHUB_OUTPUT" ;;
+          *) exit "$rc" ;;
+        esac

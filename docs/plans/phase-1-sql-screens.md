@@ -16,7 +16,7 @@ Decided by the user:
 - Library for the indicators: **TA-Lib** (see "Libraries").
 
 Open, for the next session to decide:
-- The ponytail simplification suggestions ("Simplification suggestions" below, none applied).
+- The ponytail simplification suggestions ("Simplification suggestions" below; #5 is done, the others are open).
 - Candle patterns: hand-written gap-free versions or TA-Lib's gap-based ones.
 - Who fills the history in `prices`, and when.
 - Weights, thresholds and the listing threshold, after the real score distribution is visible.
@@ -236,15 +236,15 @@ The floor is 61 rows with a margin of 2 points. Any new indicator with a longer 
 - The weights are a hypothesis. Once history exists, check them by score decile against the 5- and 20-session forward returns (not part of Phase 1).
 - Candle patterns have low reliability, hence only 5 points.
 
-## Simplification suggestions (ponytail review, none applied)
+## Simplification suggestions (ponytail review)
 
-From a `/ponytail-review` of these plans on 2026-10-28. The agent that reads this document decides which to apply. Rough saving: about 400 lines of code and yaml that are not written yet (about 250 of them only deferred).
+From a `/ponytail-review` of these plans on 2026-10-28. The agent that reads this document decides which to apply. Only #5 is applied so far; the others are still open. Rough saving: about 400 lines of code and yaml that are not written yet (about 250 of them only deferred).
 
 1. **Merge `vn_stock_get_history` into `vn_stock_screen`** (steps 2 and 3): same database, same session, so one runner and one artifact hop less and about 35 lines of yaml; `vn_stock_analyze` still gets no database secret. The user designed four jobs, so this is the user's call.
 2. **Defer `market.json`** (breadth, median change) to Phase 2: no indicator uses it any more.
 3. **Volume-definition check** (step 2): compare one liquid symbol across the three sources once by hand, instead of keeping it as a checklist item that implies shipped code.
 4. **Stage #22–#24 after #1–#21**: 14 points but the heaviest code (pivots, four candle patterns, the trendline search) and the least reliable ones per this document. Caveat: the coverage gate is written against the full 100 points; with #22–#24 unimplemented nobody would reach 80 available points before 200 rows, so the gate would have to be computed against the implemented points (e.g. available ≥ 80% of implemented).
-5. **Move `connect()`** (10 s connect and 60 s statement timeouts) from `scripts/vn_stock_daily_price_store.py` to `libs/db/__init__.py` next to `database_url()`, because steps 2 and 3 need it. Do not copy it or import from a script module.
+5. **Move `connect()`** (10 s connect and 60 s statement timeouts) from `scripts/vn_stock_daily_price_store.py` to `libs/db/__init__.py` next to `database_url()`, because steps 2 and 3 need it. Do not copy it or import from a script module. **Done** (`libs.db.connect`; the shared `VN_TZ`, `NO_DATA` and `MIN_COVERAGE` live in `libs/constants.py` for the same reason).
 6. **Step 3 output:** write JSON with `Price.model_dump(mode="json")` and read it back with the existing `read_prices` (it validates and drops duplicates); no new reader.
 7. **Document hygiene:** move "Facts for the backfill task" to that task's own plan; delete Phase 2's "After Phase 2" paragraph; Phase 2's ticker check with the `VND` exception (about 10 lines) guards a failure the score table already exposes, so add it only when the LLM actually invents a ticker.
 8. **Dropped:** the `session_date` job output; the session is simply today (VN).

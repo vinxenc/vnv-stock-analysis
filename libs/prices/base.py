@@ -1,6 +1,5 @@
 import re
 from abc import ABC, abstractmethod
-from datetime import timedelta, timezone
 from typing import Any
 
 import niquests
@@ -8,7 +7,6 @@ import niquests
 from libs.db.models import Price
 
 UA = {"User-Agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
-VN_TZ = timezone(timedelta(hours=7))
 SYMBOL_RE = re.compile(r"[A-Z0-9]{1,10}")
 
 

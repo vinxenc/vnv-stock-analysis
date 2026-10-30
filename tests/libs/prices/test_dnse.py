@@ -18,7 +18,6 @@ def http_error(code: int) -> niquests.HTTPError:
     return niquests.HTTPError(response=response)
 
 
-
 # two sessions; the second one is the latest and must be picked
 PAYLOAD = {
     "t": [ts(2026, 10, 22, 3), ts(2026, 10, 23, 3)],
@@ -40,7 +39,13 @@ def test_get_latest_price(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(source, PriceSource)
     assert price == Price.model_validate(
         dict(
-            symbol="FPT", source="DNSE", date=date(2026, 10, 23), open=57.2, high=57.2, low=56.6, close=57.0,
+            symbol="FPT",
+            source="DNSE",
+            date=date(2026, 10, 23),
+            open=57.2,
+            high=57.2,
+            low=56.6,
+            close=57.0,
             volume=7090600,
         )
     )

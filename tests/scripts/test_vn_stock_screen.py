@@ -9,11 +9,12 @@ import pytest
 from sqlalchemy import Engine
 from sqlmodel import Session
 
+from libs.constants import NO_DATA
 from libs.db import connect
 from libs.db.models import Price
 from scripts import vn_stock_screen
 from scripts.vn_stock_latest_price_retrieval import read_symbols
-from scripts.vn_stock_screen import MIN_TURNOVER, NO_DATA, SESSIONS, main, screen
+from scripts.vn_stock_screen import MIN_TURNOVER, SESSIONS, main, screen
 
 TODAY = dt.date(2026, 10, 23)  # a fixed day in the past, so main()'s default (the real today) never equals it
 
@@ -76,6 +77,19 @@ def test_screen_fails_when_newest_session_is_not_today(engine: Engine, stored_da
     store(engine, ("AAA", 10, 3_000_000, stored_date))
     with pytest.raises(RuntimeError, match="late or failed"):
         screen(engine, TODAY)
+
+
+def test_screen_fails_when_a_partial_sync_stored_few_symbols_today(engine: Engine) -> None:
+    store(engine, *[(f"S{i:02d}", 10, 3_000_000, YESTERDAY) for i in range(10)])
+    store(engine, *[(f"S{i:02d}", 10, 3_000_000, TODAY) for i in range(8)])  # 8 of 10: under 90%
+    with pytest.raises(RuntimeError, match="sync is incomplete"):
+        screen(engine, TODAY)
+
+
+def test_screen_accepts_a_sync_that_stored_enough_symbols(engine: Engine) -> None:
+    store(engine, *[(f"S{i:02d}", 10, 3_000_000, YESTERDAY) for i in range(10)])
+    store(engine, *[(f"S{i:02d}", 10, 3_000_000, TODAY) for i in range(9)])  # 9 of 10: exactly 90%
+    assert len(screen(engine, TODAY)) == 9
 
 
 def test_screen_fails_on_empty_table(engine: Engine) -> None:
