@@ -15,7 +15,7 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `libs/constants.py` | Shared by the libs and scripts: `VN_TZ`, the exit code `NO_DATA` (4), `MIN_COVERAGE` (0.9). |
 | `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. `0001` creates `prices`, `0002` adds the index on `prices.date` (`max(date)` cannot use the primary key). A migration that already ran is never edited, not even reformatted (`ruff format` skips `0001`). |
 | `docker-compose.yml` | Local Postgres 17 (user, password and database all `vnv`). |
-| `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`. Needs the `DATABASE_URL` secret of the `production` environment. |
+| `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`, this workflow or the `setup-env` action. Needs the `DATABASE_URL` secret of the `production` environment. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
 | `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
@@ -53,7 +53,7 @@ uv run alembic check                                                   # fails i
 
 `docker compose down -v` throws the local database away. Alembic is a dev dependency, so `uv sync` installs it.
 
-In production the `Migrate-Database` workflow applies the migrations on every push to `master` that changes `migrations/` (a merged PR or a direct push). The job uses the `production` environment, so `DATABASE_URL` must be an environment secret there (Settings → Environments → production), e.g. `postgresql+psycopg://user:pass@host:5432/db`. A provider URL starting with `postgres://` also works (`libs.db.database_url` rewrites it); keep `?sslmode=require` if the host needs SSL and URL-encode special characters in the password.
+In production the `Migrate-Database` workflow applies the migrations on every push to `master` that changes `migrations/`, `migrate.yml` or the `setup-env` action (a merged PR or a direct push; with nothing pending the run does nothing). The job uses the `production` environment, so `DATABASE_URL` must be an environment secret there (Settings → Environments → production), e.g. `postgresql+psycopg://user:pass@host:5432/db`. A provider URL starting with `postgres://` also works (`libs.db.database_url` rewrites it); keep `?sslmode=require` if the host needs SSL and URL-encode special characters in the password.
 
 ### Commands
 
