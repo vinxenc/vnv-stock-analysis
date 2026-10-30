@@ -2,6 +2,7 @@ import os
 import re
 
 from sqlalchemy import Engine, event
+from sqlalchemy.pool import NullPool
 from sqlmodel import create_engine
 
 from libs.logger import LogxideLogger
@@ -13,13 +14,13 @@ def database_url() -> str:
 
 
 def connect() -> Engine:
-    """Engine for $DATABASE_URL that gives up instead of hanging on a dead host (10 s) or a held lock (60 s)."""
+    """Engine for $DATABASE_URL that gives up instead of hanging on a dead host (10 s) or a held lock (60 s).
+
+    NullPool: a connection is closed as soon as it is released, so none outlives its `with` block (no pool to dispose).
+    With SQL_LOG_ENABLE=1, log every statement and its parameters (not `echo=True`: logxide swallows it).
+    """
     options = {"connect_timeout": 10, "options": "-c statement_timeout=60000"}
-    return log_sql(create_engine(database_url(), connect_args=options))
-
-
-def log_sql(engine: Engine) -> Engine:
-    """With SQL_LOG_ENABLE=1, log every statement and its parameters (not `echo=True`: logxide swallows it)."""
+    engine = create_engine(database_url(), connect_args=options, poolclass=NullPool)
     if os.environ.get("SQL_LOG_ENABLE") == "1":
         logger = LogxideLogger("sql")
         event.listen(
