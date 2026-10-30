@@ -1,6 +1,6 @@
 ---
 name: database-migrations
-description: "Safe, reversible database migration patterns: forward-only production changes, expand-contract zero-downtime renames, concurrent indexes, batched backfills, and per-tool workflows for PostgreSQL, Prisma, Drizzle, Kysely, Django, and golang-migrate. Use when writing a schema or data migration, adding a column or index to a large table, planning a rollback, or preparing a zero-downtime deploy."
+description: "Safe, reversible database migration patterns for PostgreSQL with Alembic: forward-only production changes, expand-contract zero-downtime renames, concurrent indexes, batched backfills. Use when writing a schema or data migration, adding a column or index to a large table, planning a rollback, or preparing a zero-downtime deploy."
 metadata:
   origin: ECC
 ---
@@ -91,9 +91,6 @@ ALTER TABLE users DROP COLUMN username;
 -- Step 2: Deploy application without the column reference
 -- Step 3: Drop column in next migration
 ALTER TABLE orders DROP COLUMN legacy_status;
-
--- For Django: use SeparateDatabaseAndState to remove from model
--- without generating DROP COLUMN (then drop in next migration)
 ```
 
 ### Large Data Migrations
@@ -125,269 +122,92 @@ BEGIN
 END $$;
 ```
 
-## Prisma (TypeScript/Node.js)
+## Alembic (Python)
+
+Migrations live in `migrations/versions/`, the database comes from `$DATABASE_URL` (see `migrations/env.py`).
 
 ### Workflow
 
 ```bash
-# Create migration from schema changes
-npx prisma migrate dev --name add_user_avatar
-
-# Apply pending migrations in production
-npx prisma migrate deploy
-
-# Reset database (dev only)
-npx prisma migrate reset
-
-# Generate client after schema changes
-npx prisma generate
-```
-
-### Schema Example
-
-```prisma
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  avatarUrl String?  @map("avatar_url")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  orders    Order[]
-
-  @@map("users")
-  @@index([email])
-}
-```
-
-### Custom SQL Migration
-
-For operations Prisma cannot express (concurrent indexes, data backfills):
-
-```bash
-# Create empty migration, then edit the SQL manually
-npx prisma migrate dev --create-only --name add_email_index
-```
-
-```sql
--- migrations/20240115_add_email_index/migration.sql
--- Prisma cannot generate CONCURRENTLY, so we write it manually
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_email ON users (email);
-```
-
-## Drizzle (TypeScript/Node.js)
-
-### Workflow
-
-```bash
-# Generate migration from schema changes
-npx drizzle-kit generate
-
-# Apply migrations
-npx drizzle-kit migrate
-
-# Push schema directly (dev only, no migration file)
-npx drizzle-kit push
-```
-
-### Schema Example
-
-```typescript
-import { pgTable, text, timestamp, uuid, boolean } from "drizzle-orm/pg-core";
-
-export const users = pgTable("users", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  email: text("email").notNull().unique(),
-  name: text("name"),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
-```
-
-## Kysely (TypeScript/Node.js)
-
-### Workflow (kysely-ctl)
-
-```bash
-# Initialize config file (kysely.config.ts)
-kysely init
-
-# Create a new migration file
-kysely migrate make add_user_avatar
+# Create a migration from model changes, then READ it before applying
+uv run alembic revision --autogenerate -m "add prices.adj_close"
 
 # Apply all pending migrations
-kysely migrate latest
+uv run alembic upgrade head
 
-# Rollback last migration
-kysely migrate down
+# Show the current revision / history
+uv run alembic current
+uv run alembic history --verbose
 
-# Show migration status
-kysely migrate list
+# Fails if the models and the migrations differ (use in CI)
+uv run alembic check
+
+# Print the SQL instead of running it (review a production change)
+uv run alembic upgrade head --sql
+
+# Empty migration for hand-written SQL or a data backfill
+uv run alembic revision -m "backfill prices.adj_close"
 ```
 
-### Migration File
+Autogenerate misses some changes (renames look like drop + add, server defaults, CHECK constraints) and may emit
+`sqlmodel.sql.sqltypes.AutoString()`: keep the `import sqlmodel`. Always review and edit the generated file.
 
-```typescript
-// migrations/2024_01_15_001_create_user_profile.ts
-import { type Kysely, sql } from 'kysely'
-
-// IMPORTANT: Always use Kysely<any>, not your typed DB interface.
-// Migrations are frozen in time and must not depend on current schema types.
-export async function up(db: Kysely<any>): Promise<void> {
-  await db.schema
-    .createTable('user_profile')
-    .addColumn('id', 'serial', (col) => col.primaryKey())
-    .addColumn('email', 'varchar(255)', (col) => col.notNull().unique())
-    .addColumn('avatar_url', 'text')
-    .addColumn('created_at', 'timestamp', (col) =>
-      col.defaultTo(sql`now()`).notNull()
-    )
-    .execute()
-
-  await db.schema
-    .createIndex('idx_user_profile_avatar')
-    .on('user_profile')
-    .column('avatar_url')
-    .execute()
-}
-
-export async function down(db: Kysely<any>): Promise<void> {
-  await db.schema.dropTable('user_profile').execute()
-}
-```
-
-### Programmatic Migrator
-
-```typescript
-import { Migrator, FileMigrationProvider } from 'kysely'
-import { promises as fs } from 'fs'
-import * as path from 'path'
-// ESM only — CJS can use __dirname directly
-import { fileURLToPath } from 'url'
-const migrationFolder = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  './migrations',
-)
-
-// `db` is your Kysely<any> database instance
-const migrator = new Migrator({
-  db,
-  provider: new FileMigrationProvider({
-    fs,
-    path,
-    migrationFolder,
-  }),
-  // WARNING: Only enable in development. Disables timestamp-ordering
-  // validation, which can cause schema drift between environments.
-  // allowUnorderedMigrations: true,
-})
-
-const { error, results } = await migrator.migrateToLatest()
-
-results?.forEach((it) => {
-  if (it.status === 'Success') {
-    console.log(`migration "${it.migrationName}" executed successfully`)
-  } else if (it.status === 'Error') {
-    console.error(`failed to execute migration "${it.migrationName}"`)
-  }
-})
-
-if (error) {
-  console.error('migration failed', error)
-  process.exit(1)
-}
-```
-
-## Django (Python)
-
-### Workflow
-
-```bash
-# Generate migration from model changes
-python manage.py makemigrations
-
-# Apply migrations
-python manage.py migrate
-
-# Show migration status
-python manage.py showmigrations
-
-# Generate empty migration for custom SQL
-python manage.py makemigrations --empty app_name -n description
-```
-
-### Data Migration
+### Adding a Column Safely
 
 ```python
-from django.db import migrations
+def upgrade() -> None:
+    op.add_column("prices", sa.Column("adj_close", sa.Float(), nullable=True))  # nullable first, backfill later
 
-def backfill_display_names(apps, schema_editor):
-    User = apps.get_model("accounts", "User")
-    batch_size = 5000
-    users = User.objects.filter(display_name="")
-    while users.exists():
-        batch = list(users[:batch_size])
-        for user in batch:
-            user.display_name = user.username
-        User.objects.bulk_update(batch, ["display_name"], batch_size=batch_size)
 
-def reverse_backfill(apps, schema_editor):
-    pass  # Data migration, no reverse needed
-
-class Migration(migrations.Migration):
-    dependencies = [("accounts", "0015_add_display_name")]
-
-    operations = [
-        migrations.RunPython(backfill_display_names, reverse_backfill),
-    ]
+def downgrade() -> None:
+    op.drop_column("prices", "adj_close")
 ```
 
-### SeparateDatabaseAndState
+### Adding an Index Without Downtime
 
-Remove a column from the Django model without dropping it from the database immediately:
+`CREATE INDEX CONCURRENTLY` cannot run inside a transaction, so leave Alembic's transaction first:
 
 ```python
-class Migration(migrations.Migration):
-    operations = [
-        migrations.SeparateDatabaseAndState(
-            state_operations=[
-                migrations.RemoveField(model_name="user", name="legacy_field"),
-            ],
-            database_operations=[],  # Don't touch the DB yet
-        ),
-    ]
+def upgrade() -> None:
+    with op.get_context().autocommit_block():
+        op.create_index("ix_prices_date", "prices", ["date"], postgresql_concurrently=True, if_not_exists=True)
+
+
+def downgrade() -> None:
+    with op.get_context().autocommit_block():
+        op.drop_index("ix_prices_date", table_name="prices", postgresql_concurrently=True, if_exists=True)
 ```
 
-## golang-migrate (Go)
+### Batched Backfill (separate migration from the schema change)
 
-### Workflow
-
-```bash
-# Create migration pair
-migrate create -ext sql -dir migrations -seq add_user_avatar
-
-# Apply all pending migrations
-migrate -path migrations -database "$DATABASE_URL" up
-
-# Rollback last migration
-migrate -path migrations -database "$DATABASE_URL" down 1
-
-# Force version (fix dirty state)
-migrate -path migrations -database "$DATABASE_URL" force VERSION
+```python
+def upgrade() -> None:
+    connection = op.get_bind()
+    while True:
+        updated = connection.execute(
+            sa.text(
+                """
+                UPDATE prices SET adj_close = close
+                WHERE (symbol, date) IN (
+                    SELECT symbol, date FROM prices WHERE adj_close IS NULL LIMIT 10000 FOR UPDATE SKIP LOCKED
+                )
+                """
+            )
+        ).rowcount
+        if updated == 0:
+            break
 ```
 
-### Migration Files
+Run the whole migration in one transaction only for small tables; for large ones wrap the loop in
+`with op.get_context().autocommit_block():` so each batch commits and locks are released.
 
-```sql
--- migrations/000003_add_user_avatar.up.sql
-ALTER TABLE users ADD COLUMN avatar_url TEXT;
-CREATE INDEX CONCURRENTLY idx_users_avatar ON users (avatar_url) WHERE avatar_url IS NOT NULL;
+### Alembic Rules
 
--- migrations/000003_add_user_avatar.down.sql
-DROP INDEX IF EXISTS idx_users_avatar;
-ALTER TABLE users DROP COLUMN IF EXISTS avatar_url;
-```
+- Never edit a migration that already ran in production: add a new one.
+- One head only: after merging branches, `uv run alembic heads` must list one revision (else `alembic merge`).
+- Write a real `downgrade()` or `raise NotImplementedError` to mark the migration irreversible.
+- `alembic upgrade head` is idempotent, so the deploy job can run it on every release.
+- Test on a throwaway database: `upgrade head`, `downgrade -1`, `upgrade head` again, then `alembic check`.
 
 ## Zero-Downtime Migration Strategy
 
