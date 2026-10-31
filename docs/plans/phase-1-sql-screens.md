@@ -7,6 +7,7 @@ Option 1 = "build a short list from the data, then one LLM call writes the summa
 ## Decisions and open items
 
 Decided by the user:
+- 2026-10-31: crons moved again, sync 15:15 VN (`15 8 * * 1-5`) and analysis 16:15 VN (`15 9 * * 1-5`), keeping the 15-minute offset. The line below is the earlier move.
 - 2026-10-30: both crons moved 15 minutes later, sync 20:15 VN (`15 13 * * 1-5`) and analysis 22:15 VN (`15 15 * * 1-5`): GitHub delays runs scheduled on the hour the most (one analysis run started 5 hours late). The times below say 20:00 / 22:00 for the plan's original design.
 - New pipeline, not a replacement: the existing sync workflow keeps filling `prices`, now at 20:00 VN (it was 22:00); the analysis is a second workflow.
 - Schedule: GitHub Actions only, 15:00 UTC (22:00 Vietnam), Mon–Fri. `is_holiday` checks **today**: a day off → the rest is skipped, otherwise the later jobs run. The session analysed is today's (the market closed at 15:00 VN).
