@@ -2,8 +2,8 @@ name: VN Stock Analysis
 
 on:
   schedule:
-    # 16:15 giờ VN (UTC+7) = 09:15 UTC, thứ 2 - thứ 6
-    - cron: "15 9 * * 1-5"
+    # 15:45 giờ VN (UTC+7) = 08:45 UTC, thứ 2 - thứ 6
+    - cron: "45 8 * * 1-5"
   workflow_dispatch:
 
 permissions:
