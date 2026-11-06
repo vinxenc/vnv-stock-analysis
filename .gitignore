@@ -221,3 +221,6 @@ __marimo__/
 
 # Script output
 out/
+
+# graphify output
+graphify-out/
