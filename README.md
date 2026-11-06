@@ -21,8 +21,8 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
 | `scripts/pipeline_state.py`, `scripts/notification.py`, `.github/actions/pipeline-state/` | Pipeline state files and the notification that reads them (see below). |
 | `.github/actions/setup-env/`, `.github/actions/check-holiday/` | Composite actions shared by all workflows: install uv with the cache settings and run `uv sync --locked` (see the uv cache rule below); run `scripts/vn_holiday.py` and output `holiday`. |
-| `.github/workflows/vn-stock-prices-sync.yml` | `VN Stock Prices Sync`: weekday cron (15:15 Vietnam time; not on the hour, scheduled runs on the hour are delayed most). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
-| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (16:15 Vietnam time) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync` one hour earlier), never fetches. Jobs so far: `start-analyze` → `install` → `is_holiday` (a day off skips the later jobs) → `vn_stock_screen` (uploads the `vn-stock-screen` artifact, with the `production` environment's `DATABASE_URL` secret), then `notification`. The history and analyze jobs are planned in `docs/plans/phase-1-sql-screens.md`. |
+| `.github/workflows/vn-stock-prices-sync.yml` | `VN Stock Prices Sync`: weekday cron (14:45 Vietnam time; not on the hour, scheduled runs on the hour are delayed most). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
+| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (15:45 Vietnam time) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync` one hour earlier), never fetches. Jobs so far: `start-analyze` → `install` → `is_holiday` (a day off skips the later jobs) → `vn_stock_screen` (uploads the `vn-stock-screen` artifact, with the `production` environment's `DATABASE_URL` secret), then `notification`. The history and analyze jobs are planned in `docs/plans/phase-1-sql-screens.md`. |
 
 The endpoints are undocumented and may change or block without notice.
 
@@ -67,6 +67,16 @@ In production the `Migrate-Database` workflow applies the migrations on every pu
 | `uv run python -m scripts.vn_stock_daily_price_store [input_json]` | Upsert `out/vn_stock_latest_prices.json` into the database named by `$DATABASE_URL`. |
 | `uv run python -m scripts.vn_stock_screen [output_csv]` | Write the liquid symbols (20-session average turnover) to `out/liquid_symbols.csv` (needs `$DATABASE_URL`). |
 | `uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]` | Fetch the latest price of all symbols (default `data/hose_symbols.csv`, takes about 20 min) and write `out/vn_stock_latest_prices.json`. |
+
+### Code graph (graphify)
+
+> **Warning:** run `graphify update .` before every Claude session. The `researcher` agent (`.claude/agents/researcher.md`) answers codebase questions from `graphify-out/graph.json`, and it never rebuilds the graph itself. A stale graph is skipped and the agent falls back to grep, so you lose the speed-up and risk a thinner answer.
+
+```bash
+graphify update .   # re-extracts the code (AST only), no LLM, no API cost
+```
+
+`graphify-out/` is generated and git-ignored. Install the CLI once with `uv tool install graphifyy`, then `graphify install --platform claude`.
 
 ### Pipeline state and notification
 

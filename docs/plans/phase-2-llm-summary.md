@@ -19,6 +19,19 @@ Turn `out/vn_stock_analysis.json` (the Phase 1 output) into a **pre-market HOSE 
 - Model, `anthropic` SDK vs the already-installed `niquests`, parameters: **decide when building**, after reading the current API docs.
 - Cost: a short list (a few dozen rows) → a few thousand input tokens per day, one call.
 
+## Market-wide numbers (deferred from Phase 1)
+
+A pre-market summary needs the state of the whole market, not only the shortlist. Phase 1 left it out (no indicator uses it). Add it here:
+
+- Two scopes, both reported with their symbol counts:
+  - Volume and estimated turnover (`close × volume`, thousand VND; the table has no traded value, so it is an estimate): summed over **every** symbol with a row on today's session, so a new listing is included.
+  - Advancers / decliners / unchanged and the median one-day change: only over symbols with a row on today's **and** the preceding session (a change needs both). The summary says how many symbols that is out of today's total.
+  - One SQL aggregate for each scope.
+- It needs the database, and `vn_stock_summary` has no `DATABASE_URL`. So compute it in `vn_stock_screen` (it already reads both sessions and has all 406 symbols) and write `market.json` next to `liquid_symbols.csv` in the `vn-stock-screen` artifact.
+- `vn_stock_analyze` copies it into `out/vn_stock_analysis.json`. Phase 1 gives that job only the `vn-stock-history` artifact, so add a second input here: the job also downloads the `vn-stock-screen` artifact (`needs` must include `vn_stock_screen`, or the artifact download names the run explicitly) and reads `market.json` from it. The summary job still reads only the analysis JSON, so Phase 1's output contract stays the single input of Phase 2.
+- Caveats: the scope is the symbols in `data/hose_symbols.csv`, so say "HOSE", not "the whole market". Today's adjusted close against the stored previous close skews symbols with an ex-rights day (see Phase 1 Notes); the median absorbs it, the advancer / decliner counts shift slightly.
+- Tests on the real Postgres fixture, like the screen's.
+
 ## Prompt
 
 - Summary language: Vietnamese (to be confirmed).

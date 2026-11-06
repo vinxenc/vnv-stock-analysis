@@ -7,6 +7,7 @@ Option 1 = "build a short list from the data, then one LLM call writes the summa
 ## Decisions and open items
 
 Decided by the user:
+- 2026-11-06: both crons moved 30 minutes earlier, sync 14:45 VN (`45 7 * * 1-5`) and analysis 15:45 VN (`45 8 * * 1-5`), keeping the one-hour gap. The sync now starts before the 15:00 close; the user accepted this. The line below is the earlier move.
 - 2026-10-31: crons moved again, sync 15:15 VN (`15 8 * * 1-5`) and analysis 16:15 VN (`15 9 * * 1-5`), keeping the 15-minute offset. The line below is the earlier move.
 - 2026-10-30: both crons moved 15 minutes later, sync 20:15 VN (`15 13 * * 1-5`) and analysis 22:15 VN (`15 15 * * 1-5`): GitHub delays runs scheduled on the hour the most (one analysis run started 5 hours late). The times below say 20:00 / 22:00 for the plan's original design.
 - New pipeline, not a replacement: the existing sync workflow keeps filling `prices`, now at 20:00 VN (it was 22:00); the analysis is a second workflow.
@@ -57,7 +58,7 @@ Every new job follows the existing pattern: `environment: production` when it ne
 - [x] `scripts/vn_holiday.py` is unchanged (exit 0 = day off, 3 = working day). The new workflow's `is_holiday` only decides whether the later jobs run: day off → skipped, working day → they proceed. No `session_date` output; the session analysed is today (VN).
 - [x] `vn_stock_screen` fails if `max(date)` in `prices` is not today (VN) (the sync failed, has not finished yet, or the source is stale), instead of reporting old data as fresh. `vn_stock_analyze` uses the same "today (VN)" itself (the screen's CSV carries only `code`, no date).
 - [x] Nothing runs outside GitHub Actions: no local cron, no extra server.
-- [ ] Time budget: no retrieval in this workflow, so the whole run should take only a few minutes and finish well before the 09:00 open. GitHub may delay scheduled runs, so keep the margin.
+- [x] Time budget: no retrieval in this workflow, so the whole run should take only a few minutes and finish well before the 09:00 open. GitHub may delay scheduled runs, so keep the margin.
 - [x] Update the README: add the new workflow to the files table and its jobs; the sync workflow's description now says 20:00.
 
 ### 2. `vn_stock_screen` — drop illiquid symbols (SQL on the latest trading day)
@@ -66,12 +67,11 @@ Every new job follows the existing pattern: `environment: production` when it ne
 - [x] Check `max(date)` = today (VN) (see 1); otherwise fail.
 - [x] SQL: turnover = `close × volume` (thousand VND). Keep symbols with a row today whose **average turnover over their last 20 rows ≥ 20 billion VND per day** = 20,000,000 thousand VND. Keep the threshold as one named constant in the script.
 - [x] Symbols with `volume = 0` (halted) drop out naturally; log how many were kept and dropped.
-- [ ] **Before trusting the threshold, verify the volume definition.** VNDirect's `nmVolume` is matched volume only (no put-through trades); DNSE and VPS `v` must be the same unit (shares) and definition, otherwise a symbol's turnover changes with whichever source answered that day. Compare one liquid symbol on the same day across the 3 sources.
-- [ ] Market-wide numbers are computed here, because only this job has all 406 symbols: over every symbol that has a row on today's session and on the preceding session, one SQL aggregate for advancers / decliners / unchanged, total volume, total turnover, and the median one-day change. `vn_stock_analyze` cannot compute them from the shortlist history.
-- [x] Output artifact `vn-stock-screen` (done with `liquid_symbols.csv` only; `market.json` deferred, simplification suggestion 2) with two files: `liquid_symbols.csv` (a `code` column, same shape as `data/hose_symbols.csv`, so `read_symbols` is reused) and `market.json` (the numbers above).
+- [x] **Before trusting the threshold, verify the volume definition.** VNDirect's `nmVolume` is matched volume only (no put-through trades); DNSE and VPS `v` must be the same unit (shares) and definition, otherwise a symbol's turnover changes with whichever source answered that day. Compare one liquid symbol on the same day across the 3 sources. Done: README "Adding a price source" (2026-10-29: HPG, VCB, AAM over 8 sessions) and re-run live on 2026-11-06 for HPG, VCB, SSI, VIC: identical close and volume in all 3 sources.
+- [~] Market-wide numbers (advancers / decliners / unchanged, total volume, total turnover, median one-day change over every symbol with a row on today's session and the preceding one) are **deferred to Phase 2**, see [phase-2-llm-summary.md](phase-2-llm-summary.md). No Phase 1 indicator uses them, and `prices` keeps the data, so computing them later loses nothing.
+- [x] Output artifact `vn-stock-screen` with `liquid_symbols.csv` (a `code` column, same shape as `data/hose_symbols.csv`, so `read_symbols` is reused). No `market.json` in Phase 1 (deferred, see above).
 - [x] Exit 4 (the existing "no data" code) when the shortlist is empty; the job then fails.
 - [x] Tests on the real Postgres fixture: threshold edge (exactly 20 billion kept), halted symbol, wrong `max(date)`.
-- [ ] Look at the real shortlist size once with real data (20 billion is a high bar; expect a fraction of the 406).
 
 ### 3. `vn_stock_get_history` — read the history of the shortlist from the DB
 
@@ -84,13 +84,13 @@ Every new job follows the existing pattern: `environment: production` when it ne
 
 ### 4. `vn_stock_analyze` — indicators, gates, score (heaviest)
 
-- [ ] Job `vn_stock_analyze`, `needs: vn_stock_get_history`, no DB secret. Inputs: the `vn-stock-history` artifact and `market.json` from `vn-stock-screen` (whole-market breadth, volume and median change; they go into the output for the summary, no indicator uses them).
+- [ ] Job `vn_stock_analyze`, `needs: vn_stock_get_history`, no DB secret. Input: the `vn-stock-history` artifact.
 - [ ] Stages, as plain functions in one job: load and validate → features per symbol → signal flags → ranking → output.
 - [ ] Libraries: TA-Lib (runtime dependency) for the standard indicators, stdlib for everything else. Details, verified facts and open points in "Libraries".
 - [ ] Computation by **rows**, never calendar dates (holidays). A symbol must have a row on today's session; keep only symbols with a row on the preceding session too, put the others in a "missing previous session" list and count them. An indicator with too little history is `unavailable` and a symbol below the coverage gate is `"insufficient data"` (see Scoring design); neither is ever a failure.
 - [ ] When a one-day change is beyond the HOSE band (±7%, to be verified), label the symbol "suspected corporate action" **and exclude it from every feature whose window contains that day** (returns, moving averages, highs/lows, volume average); otherwise one ex-rights day skews its features for 20–50 sessions. See Notes.
-- [ ] Output `out/vn_stock_analysis.json` (pydantic model; Phase 2 reads it, so keep it stable): `as_of`, shortlist coverage (e.g. 120 of 406 symbols), counts of `insufficient data` and flagged symbols, sources used, the whole-market numbers from `market.json`, and one entry per symbol as described in "Output per symbol". Upload it as artifact `vn-stock-analysis`.
-- [ ] Render the ranked symbols (score, coverage, theme subtotals, flags) and the market numbers as markdown tables into `$GITHUB_STEP_SUMMARY`.
+- [ ] Output `out/vn_stock_analysis.json` (pydantic model; Phase 2 reads it, so keep it stable): `as_of`, shortlist coverage (e.g. 120 of 406 symbols), counts of `insufficient data` and flagged symbols, sources used, and one entry per symbol as described in "Output per symbol". Upload it as artifact `vn-stock-analysis`.
+- [ ] Render the ranked symbols (score, coverage, theme subtotals, flags) as a markdown table into `$GITHUB_STEP_SUMMARY`.
 - [ ] Tests: holiday gap, missing session, halted symbol, too little history, a fake drop, every gate, and one test per indicator.
 - [ ] Ranking = **one composite score per symbol, 0–100, buy side first** (trend / breakout profile). The indicator table, gates and output are in "Scoring design" below. In code: one config table (id, theme, max points, thresholds, direction, minimum rows), an assertion that the maximums add up to exactly 100, one small pure function per indicator, and a test per indicator.
 
@@ -240,10 +240,10 @@ The floor is 61 rows with a margin of 2 points. Any new indicator with a longer 
 
 ## Simplification suggestions (ponytail review)
 
-From a `/ponytail-review` of these plans on 2026-10-28. The agent that reads this document decides which to apply. Only #5 is applied so far; the others are still open. Rough saving: about 400 lines of code and yaml that are not written yet (about 250 of them only deferred).
+From a `/ponytail-review` of these plans on 2026-10-28. The agent that reads this document decides which to apply. #5 and #2 are applied so far; the others are still open. Rough saving: about 400 lines of code and yaml that are not written yet (about 250 of them only deferred).
 
 1. **Merge `vn_stock_get_history` into `vn_stock_screen`** (steps 2 and 3): same database, same session, so one runner and one artifact hop less and about 35 lines of yaml; `vn_stock_analyze` still gets no database secret. The user designed four jobs, so this is the user's call.
-2. **Defer `market.json`** (breadth, median change) to Phase 2: no indicator uses it any more.
+2. **Defer `market.json`** (breadth, median change) to Phase 2: no indicator uses it any more. **Done** (decided 2026-11-06; tracked in Phase 2).
 3. **Volume-definition check** (step 2): compare one liquid symbol across the three sources once by hand, instead of keeping it as a checklist item that implies shipped code.
 4. **Stage #22–#24 after #1–#21**: 14 points but the heaviest code (pivots, four candle patterns, the trendline search) and the least reliable ones per this document. Caveat: the coverage gate is written against the full 100 points; with #22–#24 unimplemented nobody would reach 80 available points before 200 rows, so the gate would have to be computed against the implemented points (e.g. available ≥ 80% of implemented).
 5. **Move `connect()`** (10 s connect and 60 s statement timeouts) from `scripts/vn_stock_daily_price_store.py` to `libs/db/__init__.py` next to `database_url()`, because steps 2 and 3 need it. Do not copy it or import from a script module. **Done** (`libs.db.connect`; the shared `VN_TZ`, `NO_DATA` and `MIN_COVERAGE` live in `libs/constants.py` for the same reason).
