@@ -68,6 +68,16 @@ In production the `Migrate-Database` workflow applies the migrations on every pu
 | `uv run python -m scripts.vn_stock_screen [output_csv]` | Write the liquid symbols (20-session average turnover) to `out/liquid_symbols.csv` (needs `$DATABASE_URL`). |
 | `uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]` | Fetch the latest price of all symbols (default `data/hose_symbols.csv`, takes about 20 min) and write `out/vn_stock_latest_prices.json`. |
 
+### Code graph (graphify)
+
+> **Warning:** run `graphify update .` before every Claude session. The `researcher` agent (`.claude/agents/researcher.md`) answers codebase questions from `graphify-out/graph.json`, and it never rebuilds the graph itself. A stale graph is skipped and the agent falls back to grep, so you lose the speed-up and risk a thinner answer.
+
+```bash
+graphify update .   # re-extracts the code (AST only), no LLM, no API cost
+```
+
+`graphify-out/` is generated and git-ignored. Install the CLI once with `uv tool install graphifyy`, then `graphify install --platform claude`.
+
 ### Pipeline state and notification
 
 Every job of `VN Stock Prices Sync` and `VN Stock Analysis` before `notification` ends with the `.github/actions/pipeline-state` composite action. It runs even when the job failed, writes `state/<pipeline>.json` and uploads it as the artifact `pipeline-state-<pipeline>`:
