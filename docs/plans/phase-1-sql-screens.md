@@ -75,12 +75,12 @@ Every new job follows the existing pattern: `environment: production` when it ne
 
 ### 3. `vn_stock_get_history` — read the history of the shortlist from the DB
 
-- [ ] Job `vn_stock_get_history`, `needs: vn_stock_screen`, uses `DATABASE_URL` (read-only role is enough). It reads, it never writes.
-- [ ] Download the `vn-stock-screen` artifact, select the last N sessions of those symbols from `prices` (ascending by date), and upload artifact `vn-stock-history` (symbol, date, open, high, low, close, volume, source). `vn_stock_analyze` then needs no DB access.
-- [ ] N sessions: **260 recommended**. The longest lookbacks of the scoring table decide it (#5 needs 200 rows, #17 needs 250, plus a buffer). With 120 the score still works but #5 and #17 (8 points) are unavailable. See "Minimum history" in the scoring design.
-- [ ] Log symbols that have fewer than N rows. Missing rows are reported, never fatal; the analysis decides what to skip.
-- [ ] Exit 4 when no row is found.
-- [ ] Tests on the real Postgres fixture.
+- [x] Job `vn_stock_get_history`, `needs: vn_stock_screen`, uses `DATABASE_URL` (read-only role is enough). It reads, it never writes.
+- [x] Download the `vn-stock-screen` artifact, select the last N sessions of those symbols from `prices` (ascending by date), and upload artifact `vn-stock-history` (symbol, date, open, high, low, close, volume, source). `vn_stock_analyze` then needs no DB access.
+- [x] N sessions: **260 recommended**. The longest lookbacks of the scoring table decide it (#5 needs 200 rows, #17 needs 250, plus a buffer). With 120 the score still works but #5 and #17 (8 points) are unavailable. See "Minimum history" in the scoring design.
+- [x] Log symbols that have fewer than N rows. Missing rows are reported, never fatal; the analysis decides what to skip.
+- [x] Exit 4 when no row is found.
+- [x] Tests on the real Postgres fixture. Output is a folder `out/vn_stock_history/` with one `<SYMBOL>.json` (JSON array) per symbol, one SQL query per symbol (simple over fast).
 
 ### 4. `vn_stock_analyze` — indicators, gates, score (heaviest)
 
