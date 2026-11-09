@@ -16,7 +16,7 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `libs/constants.py` | Shared by the libs and scripts: `VN_TZ`, the exit code `NO_DATA` (4), `MIN_COVERAGE` (0.9). |
 | `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. `0001` creates `prices`, `0002` adds the index on `prices.date` (`max(date)` cannot use the primary key). A migration that already ran is never edited, not even reformatted (`ruff format` skips `0001`). |
 | `docker-compose.yml` | Local Postgres 17 (user, password and database all `vnv`). |
-| `.github/workflows/migrate.yml` | `Migrate-Database`: runs `alembic upgrade head` on a push to `master` that changes `migrations/`, this workflow or the `setup-env` action. Needs the `DATABASE_URL` secret of the `production` environment. |
+| `.github/workflows/cd.yml` | `CD`: on a push to `master` that changes `migrations/`, `data/seeds/`, this workflow or the `setup-env` action (or by hand), job `migrate` runs `alembic upgrade head` (schema and seed migrations alike). Needs the `DATABASE_URL` secret of the `production` environment. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
 | `tests/` | Unit tests, same layout as `libs/`, plus opt-in live tests. |
 | `scripts/vn_holiday.py` | Says whether today (Vietnam time) is a weekend or VN public holiday. Exit 0 = day off, 3 = working day, anything else = error. |
@@ -54,7 +54,7 @@ uv run alembic check                                                   # fails i
 
 `docker compose down -v` throws the local database away. Alembic is a dev dependency, so `uv sync` installs it.
 
-In production the `Migrate-Database` workflow applies the migrations on every push to `master` that changes `migrations/`, `migrate.yml` or the `setup-env` action (a merged PR or a direct push; with nothing pending the run does nothing). The job uses the `production` environment, so `DATABASE_URL` must be an environment secret there (Settings → Environments → production), e.g. `postgresql+psycopg://user:pass@host:5432/db`. A provider URL starting with `postgres://` also works (`libs.db.database_url` rewrites it); keep `?sslmode=require` if the host needs SSL and URL-encode special characters in the password.
+In production the `CD` workflow (`cd.yml`) applies the migrations on every push to `master` that changes `migrations/`, `data/seeds/`, `cd.yml` or the `setup-env` action (a merged PR or a direct push; with nothing pending the run does nothing). The job uses the `production` environment, so `DATABASE_URL` must be an environment secret there (Settings → Environments → production), e.g. `postgresql+psycopg://user:pass@host:5432/db`. A provider URL starting with `postgres://` also works (`libs.db.database_url` rewrites it); keep `?sslmode=require` if the host needs SSL and URL-encode special characters in the password.
 
 ### Commands
 
@@ -121,18 +121,20 @@ Settings for pytest, coverage and ruff live in `pyproject.toml`.
 
 #### See the SQL
 
-Set `SQL_LOG_ENABLE=1` to log every SQL statement with its parameters (through the project's logger, to stderr). It works for all three: `SQL_LOG_ENABLE=1 uv run alembic upgrade head`, `SQL_LOG_ENABLE=1 uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json` and `SQL_LOG_ENABLE=1 uv run pytest -s` (`-s`, or `-rP` on a passing test, because pytest hides the output otherwise). SQLAlchemy's own `echo=True` is not used: logxide swallows it. In CI the `test` job sets it in the workflow (`env:` of the job, with `pytest -s`), so the log shows there without anything typed; locally `export SQL_LOG_ENABLE=1` once per shell instead of prefixing every command. Build every engine with `libs.db.connect()`, which wires the logging.
+Set `SQL_LOG_ENABLE=1` to log every SQL statement with its parameters (through the project's logger, to stderr). It works for all three: `SQL_LOG_ENABLE=1 uv run alembic upgrade head`, `SQL_LOG_ENABLE=1 uv run python -m scripts.vn_stock_daily_price_store` and `SQL_LOG_ENABLE=1 uv run pytest -s` (`-s`, or `-rP` on a passing test, because pytest hides the output otherwise). SQLAlchemy's own `echo=True` is not used: logxide swallows it. In CI the `test` job sets it in the workflow (`env:` of the job, with `pytest -s`), so the log shows there without anything typed; locally `export SQL_LOG_ENABLE=1` once per shell instead of prefixing every command. Build every engine with `libs.db.connect()`, which wires the logging.
 
 #### Seed the database
 
-`tests/data/prices_hpg_aam.json` holds real history of two stocks (HPG, very liquid; AAM, almost untraded). CI runs the real migrations on the job's Postgres service, checks them against the models (`alembic check`), then seeds it with it before `pytest`, and `test_screen_on_the_seeded_database` checks the screen against that data. The same locally (that test is skipped while `$DATABASE_URL` is unset):
+Migration `0003_seed_prices` loads `data/seeds/prices_2025_2026.json.gz` (real DNSE history, adjusted, of the 406 symbols in `data/hose_symbols.csv`, 2025-01-02..2026-11-06, 171,578 rows, about 20 s) with `INSERT ... ON CONFLICT (symbol, date) DO NOTHING` (it fills missing rows, it never replaces a price the daily sync stored). So `alembic upgrade head` gives any new database, CI's included, a year and a half of prices:
 
 ```bash
 export DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv
 uv run alembic upgrade head
-uv run python -m scripts.vn_stock_daily_price_store tests/data/prices_hpg_aam.json
-uv run pytest
 ```
+
+`ENVIRONMENT=test` makes every seed migration do nothing (never set it on a database that must be seeded: the revision would be recorded as applied without its rows); `tests/conftest.py` sets it for the migrations the unit tests run, so only CI's `alembic upgrade head` on the `vnv` database (and your local one) loads the data. An applied migration never runs again, so the seed file is frozen: to load more history add a new revision with a new file, never edit this one. The daily sync keeps the table current from there.
+
+The unit tests do not use the seed: `tests/data/prices_hpg_aam.json` holds real history of two stocks (HPG, very liquid; AAM, almost untraded), and the `before_test` fixture of `test_screen` stores it in the empty test database before the screen runs.
 
 ### CI
 
@@ -142,12 +144,12 @@ uv run pytest
 |---|---|
 | `install` | `uv sync --locked`, and saves the uv cache (keyed on `uv.lock`) |
 | `lint` | `ruff check libs scripts tests` |
-| `test` | On the Postgres 17 service container (same credentials as `docker-compose.yml`): `alembic upgrade head`, `alembic check`, seeds `tests/data/prices_hpg_aam.json`, then `pytest` with the 95% coverage gate (which itself migrates a fresh `vnv_test` database) |
+| `test` | On the Postgres 17 service container (same credentials as `docker-compose.yml`): `alembic upgrade head` (which also seeds the prices), `alembic check`, then `pytest` with the 95% coverage gate (which itself migrates a fresh `vnv_test` database) |
 | `audit` | `pip-audit` on the locked runtime dependencies |
 
 Later jobs restore the cache from `install`, so their own `uv sync --locked` only has to link the packages. Commit `uv.lock` whenever you change dependencies, or `--locked` makes CI fail.
 
-**uv cache rule** (`ci.yml`, `migrate.yml`, `vn-stock-prices-sync.yml` and `vn-stock-analysis.yml`): every job installs through the `.github/actions/setup-env` composite action, whose `astral-sh/setup-uv` step sets `prune-cache: false`, and only the `install` job saves the cache (`save-cache: true`; the action's default is `false`). By default `setup-uv` runs `uv cache prune --ci` before saving, which deletes pre-built wheels; all our dependencies are wheels, so the saved cache was about 1 KB and every job downloaded the packages again. `prune-cache` is part of the cache key (`...-pruned-...` or not), so a job that restores must use the same value as `install`, or it looks up a different cache and misses. Every job except `install` restores the cache, and runs its own `uv sync --locked` to link the packages. The two pipeline workflows install with `--no-dev` (fewer wheels), so the action sets `cache-suffix: runtime` for them and `dev` when called with `dev: true` (`ci.yml`, `migrate.yml`); otherwise they would share one cache key. They share the `runtime` cache with each other, which is fine: both install the same set. A cache entry can't be overwritten, so if the runtime cache is saved first, `ci.yml` restores it without the dev wheels (pytest, ruff, pip-audit) and downloads them on every run. The reverse is harmless: a full cache saved first also contains the runtime wheels.
+**uv cache rule** (`ci.yml`, `cd.yml`, `vn-stock-prices-sync.yml` and `vn-stock-analysis.yml`): every job installs through the `.github/actions/setup-env` composite action, whose `astral-sh/setup-uv` step sets `prune-cache: false`, and only the `install` job saves the cache (`save-cache: true`; the action's default is `false`). By default `setup-uv` runs `uv cache prune --ci` before saving, which deletes pre-built wheels; all our dependencies are wheels, so the saved cache was about 1 KB and every job downloaded the packages again. `prune-cache` is part of the cache key (`...-pruned-...` or not), so a job that restores must use the same value as `install`, or it looks up a different cache and misses. Every job except `install` restores the cache, and runs its own `uv sync --locked` to link the packages. The two pipeline workflows install with `--no-dev` (fewer wheels), so the action sets `cache-suffix: runtime` for them and `dev` when called with `dev: true` (`ci.yml`, `cd.yml`); otherwise they would share one cache key. They share the `runtime` cache with each other, which is fine: both install the same set. A cache entry can't be overwritten, so if the runtime cache is saved first, `ci.yml` restores it without the dev wheels (pytest, ruff, pip-audit) and downloads them on every run. The reverse is harmless: a full cache saved first also contains the runtime wheels.
 
 ### Code rules
 
@@ -167,7 +169,7 @@ libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_acti
 tests/libs/logger/   test_logxide.py, test_github_actions.py
 tests/migrations/   test_migrations.py (downgrade, upgrade, alembic check)
 scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, vn_stock_screen.py, pipeline_state.py, notification.py
-tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`), data/prices_hpg_aam.json (real DNSE history of HPG and AAM, 2026-09-15..2026-10-29, the seed)
+tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`), data/prices_hpg_aam.json (real DNSE history of HPG and AAM, 2026-09-15..2026-10-29, test data of the screen)
 tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_vn_stock_screen.py, test_pipeline_state.py, test_notification.py
 ```
 
