@@ -44,20 +44,18 @@ prices = sa.table(
 
 
 def upgrade() -> None:
-    """Upsert on (symbol, date): a row the daily sync already stored is replaced by the seed's value.
+    """Fill the missing (symbol, date) rows: one the daily sync already stored is never replaced by the seed's value.
 
-    $SKIP_SEED=1 skips it (the unit tests migrate often and need no data): every seed migration honours it.
+    $APP_ENV=test skips it (the unit tests migrate often and need no data): every seed migration honours it. Never set
+    it on a database that must receive the seed, the revision would be recorded as applied without its rows.
     """
-    if os.environ.get("SKIP_SEED") == "1":
+    if os.environ.get("APP_ENV") == "test":
         return
     with gzip.open(SEED, "rt", encoding="utf-8") as file:
         rows = [{**row, "date": dt.date.fromisoformat(row["date"])} for row in json.load(file)]
     for start in range(0, len(rows), BATCH):
         statement = insert(prices).values(rows[start : start + BATCH])
-        changed = {
-            name: statement.excluded[name] for name in ("source", "unit", "open", "high", "low", "close", "volume")
-        }
-        op.execute(statement.on_conflict_do_update(index_elements=["symbol", "date"], set_=changed))
+        op.execute(statement.on_conflict_do_nothing(index_elements=["symbol", "date"]))
 
 
 def downgrade() -> None:
