@@ -10,8 +10,8 @@ from sqlalchemy import Engine
 from sqlmodel import Session
 
 from libs.constants import NO_DATA
-from libs.db import connect
 from libs.db.models import Price
+from scripts import vn_stock_daily_price_store as price_store
 from scripts import vn_stock_screen
 from scripts.vn_stock_latest_price_retrieval import read_symbols
 from scripts.vn_stock_screen import MIN_TURNOVER, SESSIONS, main, screen
@@ -155,17 +155,17 @@ def test_main_defaults_to_today_in_vietnam(tmp_path: Path, engine: Engine, monke
     assert main(tmp_path / "liquid_symbols.csv", engine) == 0
 
 
-def test_screen_on_the_seeded_database() -> None:
-    """HPG trades ~395 billion VND a session on average, AAM ~0.02 billion: only HPG passes.
+@pytest.fixture
+def before_test(engine: Engine) -> Engine:
+    """Runs before `test_screen`: fills the empty test database with real DNSE history of HPG and AAM (tests/data),
+    independent of the seed migration. Put any other setup that test needs here."""
+    price_store.store(price_store.read_prices(Path("tests/data/prices_hpg_aam.json")), engine)
+    return engine
 
-    Runs on the database named by $DATABASE_URL, seeded with real history (see README, "Seed the database"): CI does it
-    before pytest. Skipped when $DATABASE_URL is not set.
-    """
-    if "DATABASE_URL" not in os.environ:
-        pytest.skip("$DATABASE_URL not set: migrate and seed a database first (README, 'Seed the database')")
-    engine = connect()
-    assert screen(engine, dt.date(2026, 10, 29)) == ["HPG"]
-    engine.dispose()
+
+def test_screen(before_test: Engine) -> None:
+    """HPG trades ~395 billion VND a session on average, AAM ~0.02 billion: only HPG passes."""
+    assert screen(before_test, dt.date(2026, 10, 29)) == ["HPG"]
 
 
 def test_run_as_script(tmp_path: Path, engine: Engine, pg_url: str) -> None:
