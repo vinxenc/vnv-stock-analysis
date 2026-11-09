@@ -132,7 +132,7 @@ export DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv
 uv run alembic upgrade head
 ```
 
-`APP_ENV=test` makes every seed migration do nothing (never set it on a database that must be seeded: the revision would be recorded as applied without its rows); `tests/conftest.py` sets it for the migrations the unit tests run, so only CI's `alembic upgrade head` on the `vnv` database (and your local one) loads the data. An applied migration never runs again, so the seed file is frozen: to load more history add a new revision with a new file, never edit this one. The daily sync keeps the table current from there.
+`ENVIRONMENT=test` makes every seed migration do nothing (never set it on a database that must be seeded: the revision would be recorded as applied without its rows); `tests/conftest.py` sets it for the migrations the unit tests run, so only CI's `alembic upgrade head` on the `vnv` database (and your local one) loads the data. An applied migration never runs again, so the seed file is frozen: to load more history add a new revision with a new file, never edit this one. The daily sync keeps the table current from there.
 
 The unit tests do not use the seed: `tests/data/prices_hpg_aam.json` holds real history of two stocks (HPG, very liquid; AAM, almost untraded), and the `before_test` fixture of `test_screen` stores it in the empty test database before the screen runs.
 

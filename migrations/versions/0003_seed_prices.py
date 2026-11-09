@@ -46,10 +46,10 @@ prices = sa.table(
 def upgrade() -> None:
     """Fill the missing (symbol, date) rows: one the daily sync already stored is never replaced by the seed's value.
 
-    $APP_ENV=test skips it (the unit tests migrate often and need no data): every seed migration honours it. Never set
-    it on a database that must receive the seed, the revision would be recorded as applied without its rows.
+    $ENVIRONMENT=test skips it (the unit tests migrate often and need no data): every seed migration honours it.
+    Never set it on a database that must receive the seed, the revision would be recorded as applied without its rows.
     """
-    if os.environ.get("APP_ENV") == "test":
+    if os.environ.get("ENVIRONMENT") == "test":
         return
     with gzip.open(SEED, "rt", encoding="utf-8") as file:
         rows = [{**row, "date": dt.date.fromisoformat(row["date"])} for row in json.load(file)]

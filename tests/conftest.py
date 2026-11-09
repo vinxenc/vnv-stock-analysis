@@ -29,7 +29,7 @@ def pg_url() -> str:
     url = server.url.set(database=TEST_DB).render_as_string(hide_password=False)
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("DATABASE_URL", url)  # migrations/env.py reads the database from it
-        patch.setenv("APP_ENV", "test")  # the seed migrations load 170k rows (~20 s): the tests insert their own
+        patch.setenv("ENVIRONMENT", "test")  # the seed migrations load 170k rows (~20 s): the tests insert their own
         command.upgrade(Config("alembic.ini"), "head")  # pytest runs from the repository root
     return url
 
@@ -38,7 +38,7 @@ def pg_url() -> str:
 def alembic_config(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Config:
     """Alembic config for the test database."""
     monkeypatch.setenv("DATABASE_URL", pg_url)
-    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("ENVIRONMENT", "test")
     return Config("alembic.ini")  # pytest runs from the repository root
 
 
