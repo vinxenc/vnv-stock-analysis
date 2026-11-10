@@ -2,9 +2,9 @@ import pytest
 
 from libs.analysis import scoring
 from libs.analysis.features import Candles, Detection
-from libs.analysis.indicators import TalibIndicators
 from libs.analysis.models import IndicatorResult, IndicatorStatus, Theme
 from libs.analysis.scoring import INDICATORS, percentile_rank, ramp, trapezoid
+from libs.indicators import TalibIndicators
 from tests.libs.analysis.fakes import StubIndicators
 
 ENGINE = TalibIndicators()

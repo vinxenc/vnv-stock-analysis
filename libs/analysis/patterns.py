@@ -8,7 +8,7 @@ import math
 from itertools import combinations
 
 from libs.analysis.features import Candles, Detection, mean
-from libs.analysis.indicators import Indicators
+from libs.indicators import Indicators
 
 PIVOT_SPAN = 3  # a pivot is lower / higher than this many sessions on each side, so it is confirmed 3 sessions late
 

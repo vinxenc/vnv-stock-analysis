@@ -1,23 +1,28 @@
 """Score the shortlisted symbols from their price history (Phase 1, no LLM).
 
-Usage: uv run python -m scripts.vn_stock_analyze [history_dir]
-Default: out/vn_stock_history (see vn_stock_get_history). No database, no network: it only reads the JSON files.
-The history comes from `prices` and is taken as correct: each file is ascending by date and ends on the session
-analysed (the screen already required a bar today), so nothing is re-checked here.
+Usage: uv run python -m scripts.vn_stock_analyze [history_dir] [output_json]
+Default: out/vn_stock_history (see vn_stock_get_history) -> out/vn_stock_analysis.json. No database, no network: it
+only reads the history files and data/hose_symbols.csv (the listing dates). The history comes from `prices` and is taken
+as correct: each file is ascending by date and ends on the session analysed (the screen already required a bar
+today), so nothing is re-checked here. The ranked table goes to $GITHUB_STEP_SUMMARY when it is set, else to the log.
 Exit 0 = analysed, 4 = no history file (nothing to analyse), anything else = crash.
 """
 
+import csv
+import datetime as dt
+import os
 import sys
 from pathlib import Path
 
+from libs.analysis import summary
+from libs.analysis.report import History, build_report
 from libs.constants import NO_DATA
-from libs.db.models import Price
+from libs.indicators import Indicators, TalibIndicators
 from libs.logger import Logger, LogxideLogger
 from scripts.vn_stock_daily_price_store import read_prices
 
+SYMBOLS_CSV = Path("data/hose_symbols.csv")
 logger = LogxideLogger("vn_stock_analyze")
-
-History = dict[str, list[Price]]
 
 
 def load_history(history_dir: Path) -> History:
@@ -25,15 +30,44 @@ def load_history(history_dir: Path) -> History:
     return {path.stem: read_prices(path) for path in sorted(history_dir.glob("*.json"))}
 
 
-def main(history_dir: Path = Path("out/vn_stock_history"), log: Logger = logger) -> int:
+def read_listed_dates(path: Path = SYMBOLS_CSV) -> dict[str, dt.date]:
+    with path.open(encoding="utf-8", newline="") as file:
+        return {row["code"]: dt.date.fromisoformat(row["listed_date"]) for row in csv.DictReader(file)}
+
+
+def main(
+    history_dir: Path = Path("out/vn_stock_history"),
+    output_json: Path = Path("out/vn_stock_analysis.json"),
+    engine: Indicators | None = None,
+    summary_path: Path | None = None,
+    log: Logger = logger,
+) -> int:
+    output_json.unlink(missing_ok=True)  # an older analysis must not pass for today's, whatever happens next
     history = load_history(history_dir)
     if not history:
         log.error("no history in %s, nothing to analyse", history_dir)
         return NO_DATA
-    as_of = max(rows[-1].date for rows in history.values())
-    log.info("%s: %d symbols to score", as_of, len(history))
+    report = build_report(history, read_listed_dates(), engine or TalibIndicators())
+    output_json.parent.mkdir(parents=True, exist_ok=True)
+    output_json.write_text(report.model_dump_json(indent=1), encoding="utf-8")
+    table = summary.render(report)
+    if summary_path is None and os.environ.get("GITHUB_STEP_SUMMARY"):
+        summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+    if summary_path:
+        with summary_path.open("a", encoding="utf-8") as file:
+            file.write(table)
+    else:
+        log.info("\n%s", table)
+    log.info(
+        "%s: %d scored, %d insufficient data, %d flagged, written to %s",
+        report.as_of,
+        report.scored,
+        report.insufficient_data,
+        report.flagged,
+        output_json,
+    )
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(*map(Path, sys.argv[1:2])))
+    sys.exit(main(*map(Path, sys.argv[1:3])))

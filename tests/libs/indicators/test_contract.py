@@ -2,7 +2,7 @@
 
 import pytest
 
-from libs.analysis.indicators import PATTERNS, Indicators, TalibIndicators
+from libs.indicators import PATTERNS, Indicators, TalibIndicators
 
 ENGINES: list[Indicators] = [TalibIndicators()]
 

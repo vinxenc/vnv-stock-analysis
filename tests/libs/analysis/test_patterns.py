@@ -6,7 +6,7 @@ import pytest
 
 from libs.analysis import patterns
 from libs.analysis.features import Candles, Detection
-from libs.analysis.indicators import TalibIndicators
+from libs.indicators import TalibIndicators
 from tests.libs.analysis.fakes import StubIndicators
 
 N = 60

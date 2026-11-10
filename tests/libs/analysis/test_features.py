@@ -4,8 +4,8 @@ import pytest
 
 from libs.analysis import features
 from libs.analysis.features import Candles
-from libs.analysis.indicators import TalibIndicators
 from libs.db.models import Price
+from libs.indicators import TalibIndicators
 
 ENGINE = TalibIndicators()
 

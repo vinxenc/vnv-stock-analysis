@@ -2,7 +2,7 @@
 
 Features ask an `Indicators` for moving averages, RSI and so on; which library computes them is decided once, where the
 engine is created (`scripts/vn_stock_analyze.py`). To change library, subclass `Indicators` in this package, export it
-in `__init__.py`, and add it to `ENGINES` in `tests/libs/analysis/indicators/test_contract.py`.
+in `__init__.py`, and add it to `ENGINES` in `tests/libs/indicators/test_contract.py`.
 
 Every method takes and returns plain lists of floats, one output per input row, the start padded with `None` until the
 window is full. Whether a value is *trusted* (warm-up) is decided by the minimum rows of the scoring table, not here.

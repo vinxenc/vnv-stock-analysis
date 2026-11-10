@@ -30,7 +30,7 @@ Layout (decided):
 
 ```
 libs/analysis/models.py       output pydantic models (the stable contract)
-libs/analysis/indicators/     Indicators interface (base.py) + TalibIndicators (talib_engine.py), the only talib / numpy import; features get the engine injected, a new library = a new subclass
+libs/indicators/              Indicators interface (base.py) + TalibIndicators (talib_engine.py), the only talib / numpy import; features get the engine injected, a new library = a new subclass
 libs/analysis/features.py     raw feature functions
 libs/analysis/scoring.py      config table, ramp(), percentile rank, assert sum == 100
 libs/analysis/gates.py        coverage gate, uptrend gate, flags
@@ -101,19 +101,21 @@ Each indicator = raw function + config row + test on a **small hand-computed ser
 
 ### G. Ranking, output, summary table
 
-- [ ] Sort by score (desc), ties by turnover (desc); `insufficient data` symbols after the scored ones.
-- [ ] Write `out/vn_stock_analysis.json` from the pydantic model (the directory is emptied / the file removed first, like the other scripts, so an old file never passes for today's).
-- [ ] Markdown table to `$GITHUB_STEP_SUMMARY`: rank, symbol, score, coverage, five theme subtotals, flags; a header line with `as_of`, shortlist size, counts. Local runs print the same table to stdout instead.
-- [ ] Logging through `Logger` (never `print`); log counts of scored / insufficient / flagged.
-- [ ] Exit codes: 0 ok, 4 no data, anything else = crash (same convention).
+- [x] Sort by score (desc), ties by turnover (desc); `insufficient data` symbols after the scored ones.
+- [x] Write `out/vn_stock_analysis.json` from the pydantic model (the directory is emptied / the file removed first, like the other scripts, so an old file never passes for today's).
+- [x] Markdown table to `$GITHUB_STEP_SUMMARY`: rank, symbol, score, coverage, five theme subtotals, flags; a header line with `as_of`, shortlist size, counts. Without `$GITHUB_STEP_SUMMARY` (local runs) the same table goes to the log (no `print`).
+- [x] Logging through `Logger` (never `print`); log counts of scored / insufficient / flagged.
+- [x] Exit codes: 0 ok, 4 no data, anything else = crash (same convention).
+- Notes: code in `libs/analysis/report.py` (build, rank) and `summary.py` (markdown); the script reads the listing dates from `data/hose_symbols.csv` for the `new_listing` flag and `universe_size`. `sources` = the sources of the session analysed. Score = the sum of points (not rescaled), shown only when coverage ≥ 80; the table prints `n/a` otherwise. A one-row history does not crash (previous close falls back to the close). Run on the 88 real files: 87 scored, 1 insufficient data (LPS), top TCH 68.2; the JSON is about 430 KB.
 
 ### H. Workflow job
 
-- [ ] Job `vn_stock_analyze` in `.github/workflows/vn-stock-analysis.yml`: `needs: [install, is_holiday, vn_stock_get_history]`, **no** `environment` and no `DATABASE_URL`.
-- [ ] Download artifact `vn-stock-history` into `out/vn_stock_history`, run `uv run --no-sync python -m scripts.vn_stock_analyze`, upload `vn-stock-analysis` (the JSON), write the summary table.
-- [ ] End with the `pipeline-state` action (success / failure messages), add the job to `notification`'s `needs`.
-- [ ] Check the `uv` cache rule is respected (`prune-cache: false`, only `install` saves).
-- [ ] Job timeout and artifact retention consistent with the other jobs.
+- [x] Job `vn_stock_analyze` in `.github/workflows/vn-stock-analysis.yml`: `needs: vn_stock_get_history`, **no** `environment` and no `DATABASE_URL`.
+- [x] Download artifact `vn-stock-history` into `out/vn_stock_history`, run `uv run --no-sync python -m scripts.vn_stock_analyze`, upload `vn-stock-analysis` (the JSON), write the summary table.
+- [x] End with the `pipeline-state` action (success / failure messages), add the job to `notification`'s `needs`.
+- [x] Check the `uv` cache rule is respected (`prune-cache: false`, only `install` saves).
+- [x] Job timeout and artifact retention consistent with the other jobs.
+- Notes: the job has no `if` of its own: a day off skips `vn_stock_screen` and everything after it. The history artifact is downloaded into `out/vn_stock_history`, where the script expects it; `data/hose_symbols.csv` comes from the checkout. Not run on GitHub yet: the YAML parses and the job graph is `…get_history → analyze → notification`; the real `workflow_dispatch` run is in "Done when".
 
 ### I. Tests and "done when"
 

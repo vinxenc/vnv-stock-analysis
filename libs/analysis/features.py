@@ -9,8 +9,8 @@ plan's minimum-rows column: "N + 1 rows" means N sessions before today, or N one
 
 from dataclasses import dataclass, field
 
-from libs.analysis.indicators import Indicators
 from libs.db.models import Price
+from libs.indicators import Indicators
 
 UP_DOWN_CAP = 10.0  # up/down volume ratio when nothing was sold: well above the ramp's top, finite for the JSON
 CROSS_AGE_CAP = 6.0  # a MACD cross older than this scores nothing, so the age stops counting here

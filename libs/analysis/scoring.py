@@ -12,8 +12,8 @@ from typing import Literal
 from libs.analysis import features, patterns
 from libs.analysis.features import Candles, Detection
 from libs.analysis.gates import uptrend_gate
-from libs.analysis.indicators import Indicators
 from libs.analysis.models import IndicatorResult, IndicatorStatus, Theme
+from libs.indicators import Indicators
 
 Curve = Callable[[float], float]  # raw value -> share of the maximum points, 0..1
 Raw = float | Detection | None  # a number, what a shape feature found (#22-#24), or None = cannot be computed

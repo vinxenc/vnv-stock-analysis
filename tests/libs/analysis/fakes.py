@@ -1,4 +1,7 @@
-from libs.analysis.indicators import PATTERNS, Flags, Indicators, Series, Values
+import datetime as dt
+
+from libs.db.models import Price
+from libs.indicators import PATTERNS, Flags, Indicators, Series, Values
 
 
 class StubIndicators(Indicators):
@@ -34,3 +37,28 @@ class StubIndicators(Indicators):
 
     def bullish_patterns(self, opens: Values, highs: Values, lows: Values, closes: Values) -> Flags:
         return {name: self.pattern_flags.get(name, [False] * len(closes)) for name in PATTERNS}
+
+
+def make_rows(
+    symbol: str, count: int, source: str = "A", daily_growth: float = 1.002, end: dt.date | None = None
+) -> list[Price]:
+    """`count` consecutive daily rows ending on `end`, the price growing `daily_growth` a day, volume 1000 + day."""
+    end = end or dt.date(2026, 11, 10)
+    rows = []
+    for index in range(count):
+        close = 10 * daily_growth**index
+        rows.append(
+            Price.model_validate(
+                dict(
+                    symbol=symbol,
+                    source=source,
+                    date=end - dt.timedelta(days=count - 1 - index),
+                    open=close,
+                    high=close * 1.01,
+                    low=close * 0.99,
+                    close=close,
+                    volume=1000 + index,
+                )
+            )
+        )
+    return rows
