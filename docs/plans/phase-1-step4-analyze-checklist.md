@@ -119,12 +119,12 @@ Each indicator = raw function + config row + test on a **small hand-computed ser
 
 ### I. Tests and "done when"
 
-- [ ] One test per indicator, per gate, and the cases that remain: halted symbol (volume 0 / high = low), too little history, every gate.
-- [ ] Contract test: the JSON validates against the model and equals the example file's shape.
-- [ ] End-to-end test on `tests/data/prices_hpg_aam.json` (real HPG and AAM): AAM is almost untraded, HPG is very liquid.
-- [ ] Manual run: local Postgres seeded → today's copied row → screen → history → analyze → eyeball the top 10 against a chart of 3 symbols.
-- [ ] Real `workflow_dispatch` run shows the score table in the job summary; a day off skips the job.
-- [ ] `uv run pytest` ≥ 95% coverage, `ruff` clean.
+- [x] One test per indicator, per gate, and the cases that remain: halted symbol (`high == low` → #15 unavailable; zero average volume → `None`), too little history (min rows), every gate.
+- [x] Contract test: the JSON validates against the model and equals the example file's shape (`test_models.py`, and `AnalysisReport.model_validate_json` on the script's own output).
+- [x] End-to-end test on `tests/data/prices_hpg_aam.json` (real HPG and AAM): both are `insufficient data` (31–33 rows), HPG ranks before AAM by turnover, AAM's #15 is unavailable (locked), #5, #7, #17, #24 unavailable.
+- [x] Manual run on the real local database (sync of 2026-11-10 plus the DNSE bars of 2026-11-09, no copied rows): screen kept 88 symbols, history, analyze gave 87 scored and 1 `insufficient data` (LPS, 58 rows), top TCH 68.2. Instead of eyeballing charts, the raw values of the top symbol (#1, #2, #5, #6, #7, #8, #12, #15, #16, #17, #18) were recomputed in plain Python from its history file: all equal to the output.
+- [ ] Real `workflow_dispatch` run shows the score table in the job summary; a day off skips the job. **Needs a push and a run on GitHub (production secrets): not done.**
+- [x] `uv run pytest` ≥ 95% coverage (98.1%), `ruff` clean.
 
 ### J. Documents
 

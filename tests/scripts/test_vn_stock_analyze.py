@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from libs.analysis.models import AnalysisReport, SymbolStatus
+from libs.analysis.models import AnalysisReport, IndicatorStatus, SymbolStatus
 from libs.constants import NO_DATA
 from scripts.vn_stock_analyze import load_history, main, read_listed_dates
 from tests.libs.analysis.fakes import make_rows
@@ -78,3 +78,28 @@ def test_main_uses_github_step_summary_when_set(tmp_path: Path, monkeypatch: pyt
     write_history(tmp_path, "HPG", 30)
     assert main(tmp_path, tmp_path / "analysis.json", log=MagicMock()) == 0
     assert "| 1 | HPG |" in summary_file.read_text(encoding="utf-8")
+
+
+def test_real_hpg_and_aam_history_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Real DNSE history (31-33 sessions): HPG is very liquid, AAM almost untraded and locked on its last two days.
+
+    Neither has the 61 rows a score needs, so both are `insufficient data`: the ranking falls back on turnover.
+    """
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    rows = json.loads((Path(__file__).parents[1] / "data" / "prices_hpg_aam.json").read_text(encoding="utf-8"))
+    for symbol in ("HPG", "AAM"):
+        symbol_rows = sorted((row for row in rows if row["symbol"] == symbol), key=lambda row: row["date"])
+        (tmp_path / f"{symbol}.json").write_text(json.dumps(symbol_rows), encoding="utf-8")
+    output = tmp_path / "analysis.json"
+
+    assert main(tmp_path, output, log=MagicMock()) == 0
+
+    report = AnalysisReport.model_validate_json(output.read_text(encoding="utf-8"))
+    hpg, aam = report.symbols
+    assert (hpg.symbol, aam.symbol) == ("HPG", "AAM")  # no score for either: the more liquid one comes first
+    assert hpg.status == aam.status == SymbolStatus.INSUFFICIENT_DATA
+    assert hpg.score is None and hpg.turnover > 1000 * aam.turnover
+    close_location = {symbol.symbol: next(i for i in symbol.indicators if i.id == 15) for symbol in report.symbols}
+    assert close_location["HPG"].status == IndicatorStatus.SCORED
+    assert close_location["AAM"].status == IndicatorStatus.UNAVAILABLE  # high == low on the last session
+    assert all(item.status == IndicatorStatus.UNAVAILABLE for item in aam.indicators if item.id in (5, 7, 17, 24))
