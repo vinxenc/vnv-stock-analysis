@@ -9,6 +9,7 @@ dependencies = [
     "psycopg[binary]>=3.3.6",
     "pydantic>=2",
     "sqlmodel>=0.0.48",
+    "ta-lib>=0.8.2",
     "tenacity>=9.2.1",
 ]
 

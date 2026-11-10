@@ -1,0 +1,132 @@
+# Phase 1, step 4 — `vn_stock_analyze`: detailed checklist (for review)
+
+Status: **all review questions answered, ready to build** (2026-11-10). Expands step 4 of [phase-1-sql-screens.md](phase-1-sql-screens.md); the indicator table, definitions, gates and output contract stay defined there. This file only says **how to build it, in which order, and how to test it**.
+
+## Decided (2026-11-10)
+
+- Prices are already in the database. Locally the data comes from `data/seeds/` (migration `0003_seed_prices`, 2025-01-02..2026-11-06, about 460 sessions per symbol), so no backfill task blocks this step.
+- The batch upsert is already done in the store script.
+- `vn_stock_get_history` stays a **separate job** (not merged into `vn_stock_screen`): each job's logic must be changeable on its own.
+- **TA-Lib** is the indicator library, including its candle patterns for #23 (see Q1 for what that changes).
+- Dependabot / `pip-audit` schedule: later, not in this step.
+- Candle patterns: TA-Lib as is. Its gap-based morning star / piercing line will rarely fire on HOSE; the gap handling is fixed later in a different pipeline.
+- Layout: many small modules under `libs/analysis/`; the script only calls them (easier to review).
+- Local run: on a trading day run the real sync (retrieval + store) after `alembic upgrade head`; otherwise copy the last stored session to today (README has both); production code gets no new switch, no `AS_OF`.
+- Percentile-rank indicators (#6, #7, #20) depend on the whole shortlist; accepted.
+- #22–#24 ship together with #1–#21 (slice F after E, same feature); the coverage gate stays on the full 100 points.
+
+## Design rules (so each piece can change alone)
+
+- **Three layers, three places**, so tuning one never touches the others:
+  1. *raw features*: pure functions `(rows) -> raw values or None` (SMA gap, RSI, PPO histogram, …). Know nothing about points.
+  2. *scoring config*: one table (id, theme, max points, lo/hi thresholds, direction, min rows). Changing a weight or a threshold edits one row.
+  3. *gates and flags*: coverage, uptrend, missing session, corporate action. Separate functions, not inside the indicators.
+- The job only reads the `vn-stock-history` artifact (no DB, no network) and writes `out/vn_stock_analysis.json`. Phase 2 reads only that JSON.
+- NaN never leaves the TA-Lib boundary: convert to `None` ("unavailable") in one helper.
+- Pure functions on plain lists / small pydantic models; numpy arrays only inside the TA-Lib wrapper.
+
+Layout (decided):
+
+```
+libs/analysis/models.py       output pydantic models (the stable contract)
+libs/analysis/talib_wrap.py   the only file that imports talib / numpy; NaN -> None
+libs/analysis/features.py     raw feature functions
+libs/analysis/scoring.py      config table, ramp(), percentile rank, assert sum == 100
+libs/analysis/gates.py        market calendar, corporate-action detection, coverage, uptrend gate
+scripts/vn_stock_analyze.py   load -> features -> gates -> score -> rank -> JSON + summary table
+tests/libs/analysis/…, tests/scripts/test_vn_stock_analyze.py
+```
+
+## Slices (one PR each, in this order)
+
+### A. Dependency and local data
+
+- [x] Add `TA-Lib` to the **runtime** dependencies in `pyproject.toml` (not the dev group: the workflow installs `--no-dev`); refresh `uv.lock`; check `uv sync --locked --no-dev` works on macOS arm64 and on the CI Linux runner.
+- [~] Verify the wheel bundles the C library (no system `ta-lib` needed) and that `import talib` works in the `install` job; update the README cache note if the `runtime` cache key or size changes. (done locally: `uv sync --locked --no-dev` + `import talib` on macOS arm64, `uv.lock` has the manylinux x86_64 cp312 wheel; the CI `install` job still to confirm on the PR)
+- [x] Local run recipe in the README: `docker compose up -d`, `uv run alembic upgrade head` (loads the seed), then screen → history → analyze.
+- [x] **Local row for today.** `vn_stock_screen` fails unless the newest session is today (VN) and at least 90% of the previous session's symbols have a bar today; the seed ends 2026-11-06. Locally, copy the newest session to today and run the pipeline normally. One documented SQL statement in the README, no script, no code change:
+
+  ```sql
+  INSERT INTO prices (symbol, date, source, unit, open, high, low, close, volume)
+  SELECT symbol, CURRENT_DATE, source, unit, open, high, low, close, volume
+  FROM prices WHERE date = (SELECT max(date) FROM prices)
+  ON CONFLICT (symbol, date) DO NOTHING;
+  ```
+
+  Caveats to write next to it: a copied bar means 0% change and the same volume (fine for a smoke run, not for judging scores); on a weekend `CURRENT_DATE` is not a session, so set the date by hand; delete the copied rows afterwards (`DELETE FROM prices WHERE date = CURRENT_DATE`) before running the real sync against that database.
+
+### B. Output contract (models first, so Phase 2 can be reviewed against it)
+
+- [x] `AnalysisReport`: `as_of`, `shortlist_size`, `universe_size` (e.g. 120 of 406), counts (`scored`, `insufficient_data`, `flagged`, `missing_previous_session`), `missing_previous_session` list, `sources` used, `symbols` list.
+- [x] `SymbolResult`: `symbol`, `score` (None when the coverage gate fails), `coverage` (available points), `status` (`scored` / `insufficient data`), theme subtotals, `indicators`, `flags`, turnover (for the tie-break).
+- [x] `IndicatorResult`: `id`, `points`, `max`, `raw` (dict of the raw values named in "Output per symbol"), `status` (`scored` / `gate_closed` / `unavailable`).
+- [x] Flags enum: `ceiling_locked` (close within 0.5% of +7%), `new_listing`, `suspected_corporate_action`, `low_coverage`. Flags never change the score.
+- [x] `extra="forbid"` and an example JSON checked into `tests/data/` so a contract change is a visible diff.
+
+### C. Loading and the market calendar
+
+- [ ] Read `out/vn_stock_history/*.json` with the existing `read_prices` (validates, drops duplicates); one `list[Price]` per symbol, ascending.
+- [ ] `today` = today (VN). A symbol without a row on `today` is dropped and counted (should not happen after the screen; log it).
+- [ ] Market calendar = the distinct dates across all history files. Needed by the missing-session gate.
+- [ ] Symbol without a row on the preceding market session → "missing previous session" list, counted, excluded from scoring.
+- [ ] Empty history folder → exit `NO_DATA` (4), like the other jobs.
+
+### D. Gates (before any indicator, because they decide which windows are valid)
+
+- [ ] Corporate action: find one-day changes beyond the HOSE band ±7% (±20% for the first session after `listed_date` in `data/hose_symbols.csv`), only between *adjacent market sessions*. Record the index of the latest jump per symbol.
+- [ ] Verify the band value (the plan says "to be verified"): ±7% HOSE, ±20% new listing, and the open question about a first session after a long suspension.
+- [ ] Missing session: any fixed-window indicator whose window contains a market session missing for that symbol is `unavailable`; EMA / Wilder ones continue across the gap.
+- [ ] A fixed window containing a jump → `unavailable`; EMA / Wilder ones (#8–#11, #22) restart on the rows after the jump and are available again once rows-since-jump reach their min rows. #23 unavailable if its 3 candles or 5-session context contain the jump; #24 if its 60-session window does.
+- [ ] Coverage gate: score only when available points ≥ 80, else `insufficient data` with no number.
+- [ ] Uptrend gate for #22, #23: closed (0 points, `gate_closed`) when the raw value of #4 < 0; `unavailable` when #4 itself is unavailable.
+- [ ] Tests: holiday gap (not a missing session), a real missing session, a fake +14.5% from two ceiling days around a gap, ex-rights drop in the last 5 / 20 / 100 sessions, new-listing ±20%.
+
+### E. Indicators (#1–#21), in groups so each group is a reviewable commit
+
+Each indicator = raw function + config row + test on a **small hand-computed series** (TA-Lib golden values would be circular).
+
+- [ ] Scoring core: `ramp(x, lo, hi, direction)`, yes/no, percentile rank, config table, `assert sum(max) == 100`, available-points calculation.
+- [ ] Trend #1–#5: `talib.SMA`; #3 yes/no; #4 SMA50 vs 10 sessions ago.
+- [ ] Momentum #6–#7 (percentile rank across the shortlist: needs a second pass after all raws exist), #8 `talib.RSI(14)` with the trapezoid ramp, #9–#11 PPO recipe: `talib.PPO(close, 12, 26, matype=1) / 100`, histogram = ppo − `talib.EMA(ppo, 9)` on the non-NaN part (**not** `talib.MACD`), #11 cross recency.
+- [ ] Money flow #12–#15: up-day-only volume ratio, up/down-volume ratio (full points when no down-volume), 5/20 turnover ratio, close location (unavailable when high = low).
+- [ ] Position #16–#18: prior 20-session high (excluding today), 250-session high, higher lows.
+- [ ] Risk #19–#21: overextension, `talib.STDDEV` of daily returns + percentile rank (#20), distribution-day yes/no.
+- [ ] Re-measure the warm-up min rows (#8 45, #9 70, #10 55, #11 70) against the seed's real history once the code exists; edit the config rows if they differ.
+- [ ] Check the seed for symbols with too little history (new listings) → `insufficient data` path exercised on real data.
+
+### F. Indicators #22–#24 (the heavy ones)
+
+- [ ] #23 candle patterns with **TA-Lib** (`CDLENGULFING`, `CDLHAMMER`, `CDLMORNINGSTAR`, `CDLPIERCING`), strength 1.0 / 1.0 / 1.0 / 0.8 / 0.7 as in the plan, volume factor, recency factor, skip `high == low`, 5-session ≤ −3% context. The plan's gap-free hand-written variants are dropped (Q1).
+- [ ] #22 RSI bullish divergence: pivots (3 before / 3 after on close), latest two pivot lows within 40 sessions and ≥ 5 apart, conditions and recency per the plan; raw value = dates and RSI of L1 and L2.
+- [ ] #24 descending trendline breakout: pivot highs, candidate lines on `ln(high)` over the 60 sessions ending t−3, validity check (no high above the line by > 0.5%), choose by touches / length / recency, breakout on t−2..t, recency, volume and touches factors; raw value = anchor pivots, `L(t)`, touches.
+- [ ] Plot the detected trendlines and divergences for about 20 real symbols once (throwaway script in the scratchpad, not committed) before trusting the weights.
+
+### G. Ranking, output, summary table
+
+- [ ] Sort by score (desc), ties by turnover (desc); `insufficient data` symbols after the scored ones.
+- [ ] Write `out/vn_stock_analysis.json` from the pydantic model (the directory is emptied / the file removed first, like the other scripts, so an old file never passes for today's).
+- [ ] Markdown table to `$GITHUB_STEP_SUMMARY`: rank, symbol, score, coverage, five theme subtotals, flags; a header line with `as_of`, shortlist size, counts. Local runs print the same table to stdout instead.
+- [ ] Logging through `Logger` (never `print`); log counts of scored / insufficient / flagged / missing-previous-session.
+- [ ] Exit codes: 0 ok, 4 no data, anything else = crash (same convention).
+
+### H. Workflow job
+
+- [ ] Job `vn_stock_analyze` in `.github/workflows/vn-stock-analysis.yml`: `needs: [install, is_holiday, vn_stock_get_history]`, **no** `environment` and no `DATABASE_URL`.
+- [ ] Download artifact `vn-stock-history` into `out/vn_stock_history`, run `uv run --no-sync python -m scripts.vn_stock_analyze`, upload `vn-stock-analysis` (the JSON), write the summary table.
+- [ ] End with the `pipeline-state` action (success / failure messages), add the job to `notification`'s `needs`.
+- [ ] Check the `uv` cache rule is respected (`prune-cache: false`, only `install` saves).
+- [ ] Job timeout and artifact retention consistent with the other jobs.
+
+### I. Tests and "done when"
+
+- [ ] One test per indicator, per gate, and the cases of step 4: holiday gap, missing session, halted symbol (volume 0 / high = low), too little history, fake drop, every gate.
+- [ ] Contract test: the JSON validates against the model and equals the example file's shape.
+- [ ] End-to-end test on `tests/data/prices_hpg_aam.json` (real HPG and AAM): AAM is almost untraded, HPG is very liquid.
+- [ ] Manual run: local Postgres seeded → today's copied row → screen → history → analyze → eyeball the top 10 against a chart of 3 symbols.
+- [ ] Real `workflow_dispatch` run shows the score table in the job summary; a day off skips the job.
+- [ ] `uv run pytest` ≥ 95% coverage, `ruff` clean.
+
+### J. Documents
+
+- [ ] Phase 1 plan: tick step 4 and 5, fix the stale Assumption (line 47 says the table only has days since 2026-10-27; it now has the seed back to 2025-01-02), update Open questions 1, 4, 5, 6 with today's decisions.
+- [ ] README: add `vn_stock_analyze` to the workflow's jobs, the new scripts to the file tree, the local-run recipe (seed, today's row).

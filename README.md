@@ -136,6 +136,37 @@ uv run alembic upgrade head
 
 The unit tests do not use the seed: `tests/data/prices_hpg_aam.json` holds real history of two stocks (HPG, very liquid; AAM, almost untraded), and the `before_test` fixture of `test_screen` stores it in the empty test database before the screen runs.
 
+#### Run the analysis pipeline locally
+
+`vn_stock_screen` fails unless the newest session in `prices` is today (VN), and the seed stops at its build date. So on a trading day, run the real sync first (it fetches today's bar of every symbol, about 20 min) and then the analysis jobs:
+
+```bash
+docker compose up -d --wait
+export DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv
+uv run alembic upgrade head                                  # schema + seed
+uv run python -m scripts.vn_stock_latest_price_retrieval     # fetch today's bars
+uv run python -m scripts.vn_stock_daily_price_store          # upsert them into prices
+uv run python -m scripts.vn_stock_screen && uv run python -m scripts.vn_stock_get_history
+```
+
+Without a real bar for today (weekend, holiday, before the close, or no time for the sync), copy the newest session to today instead (no code switch, production is unchanged):
+
+```bash
+docker compose exec -T postgres psql -U vnv -d vnv -c "INSERT INTO prices (symbol, date, source, unit, open, high, low, close, volume) SELECT symbol, CURRENT_DATE, source, unit, open, high, low, close, volume FROM prices WHERE date = (SELECT max(date) FROM prices) ON CONFLICT (symbol, date) DO NOTHING"
+```
+
+A copied bar means a 0% change and the same volume as the last session: fine for a smoke run, useless for judging scores. On a weekend `CURRENT_DATE` is not a session, so put the date by hand. The real sync overwrites the copy (same `(symbol, date)`); to remove it, `DELETE FROM prices WHERE date = CURRENT_DATE`.
+
+**One Postgres at a time.** Every worktree has its own compose project (named after the folder) but they all publish `127.0.0.1:5432`, so only one can run. When you start working in a new worktree, stop the others first, then recreate this one (an old container created while the port was taken has no port mapping, so `--force-recreate`) and re-seed:
+
+```bash
+docker ps -q --filter publish=5432 | xargs -r docker stop
+docker compose up -d --force-recreate --wait
+DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv uv run alembic upgrade head
+```
+
+`TA-Lib` (indicators) is a runtime dependency, so the `install` job's `uv sync --locked` fetches its wheel (the C library is bundled; no system package needed) and numpy.
+
 ### CI
 
 `.github/workflows/ci.yml` runs on every pull request to `master`. The jobs run in order, and each one needs the previous one to pass.
@@ -165,6 +196,8 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 libs/constants.py   VN_TZ, exit codes, MIN_COVERAGE
 libs/prices/   base.py (Price, PriceSource, PriceNotFoundError, helpers), dnse.py, vps.py, vndirect.py
 tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
+libs/analysis/   models.py (the `vn_stock_analyze` output contract: AnalysisReport, SymbolResult, IndicatorResult)
+tests/libs/analysis/   test_models.py (example JSON in tests/data/analysis_example.json)
 libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_actions.py (GithubActionsLogger, workflow commands on stdout)
 tests/libs/logger/   test_logxide.py, test_github_actions.py
 tests/migrations/   test_migrations.py (downgrade, upgrade, alembic check)
