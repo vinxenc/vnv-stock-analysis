@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from libs.analysis.models import AnalysisReport, IndicatorStatus, SymbolStatus
+from libs.analysis.models import AnalysisReport, IndicatorStatus
 from libs.constants import NO_DATA
 from scripts.vn_stock_analyze import load_history, main, read_listed_dates
 from tests.libs.analysis.fakes import make_rows
@@ -49,19 +49,17 @@ def test_main_writes_the_report_and_the_summary(tmp_path: Path, monkeypatch: pyt
     write_history(history_dir, "AAM", 30)
     output, summary_file = tmp_path / "out" / "analysis.json", tmp_path / "summary.md"
     summary_file.write_text("earlier step\n")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
     log = MagicMock()
 
-    assert main(history_dir, output, summary_path=summary_file, log=log) == 0
+    assert main(history_dir, output, log=log) == 0
 
     report = AnalysisReport.model_validate_json(output.read_text(encoding="utf-8"))  # the contract Phase 2 reads
-    assert [(item.symbol, item.status) for item in report.symbols] == [
-        ("HPG", SymbolStatus.SCORED),
-        ("AAM", SymbolStatus.INSUFFICIENT_DATA),
-    ]
+    assert [(item.symbol, item.score is not None) for item in report.symbols] == [("HPG", True), ("AAM", False)]
     text = summary_file.read_text(encoding="utf-8")
     assert text.startswith("earlier step\n## VN stock screening score")  # appended, never overwritten
     assert "| 1 | HPG |" in text
-    assert log.info.call_args.args[1:5] == (dt.date(2026, 11, 10), 1, 1, 1)  # as_of, scored, insufficient, flagged
+    assert log.info.call_args.args[1:4] == (dt.date(2026, 11, 10), 2, 1)  # as_of, symbols, scored
 
 
 def test_main_without_a_summary_file_logs_the_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,14 +68,6 @@ def test_main_without_a_summary_file_logs_the_table(tmp_path: Path, monkeypatch:
     log = MagicMock()
     assert main(tmp_path, tmp_path / "analysis.json", log=log) == 0
     assert "| 1 | HPG |" in log.info.call_args_list[0].args[1]
-
-
-def test_main_uses_github_step_summary_when_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    summary_file = tmp_path / "step_summary.md"
-    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
-    write_history(tmp_path, "HPG", 30)
-    assert main(tmp_path, tmp_path / "analysis.json", log=MagicMock()) == 0
-    assert "| 1 | HPG |" in summary_file.read_text(encoding="utf-8")
 
 
 def test_real_hpg_and_aam_history_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -97,8 +87,7 @@ def test_real_hpg_and_aam_history_end_to_end(tmp_path: Path, monkeypatch: pytest
     report = AnalysisReport.model_validate_json(output.read_text(encoding="utf-8"))
     hpg, aam = report.symbols
     assert (hpg.symbol, aam.symbol) == ("HPG", "AAM")  # no score for either: the more liquid one comes first
-    assert hpg.status == aam.status == SymbolStatus.INSUFFICIENT_DATA
-    assert hpg.score is None and hpg.turnover > 1000 * aam.turnover
+    assert hpg.score is None and aam.score is None and hpg.turnover > 1000 * aam.turnover
     close_location = {symbol.symbol: next(i for i in symbol.indicators if i.id == 15) for symbol in report.symbols}
     assert close_location["HPG"].status == IndicatorStatus.SCORED
     assert close_location["AAM"].status == IndicatorStatus.UNAVAILABLE  # high == low on the last session

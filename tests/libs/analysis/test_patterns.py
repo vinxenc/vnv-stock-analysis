@@ -12,12 +12,11 @@ from tests.libs.analysis.fakes import StubIndicators
 N = 60
 
 
-def test_pivot_lows_and_highs_need_to_beat_three_sessions_on_each_side() -> None:
+def test_pivot_lows_need_to_beat_three_sessions_on_each_side() -> None:
     assert patterns.pivot_lows([9, 9, 9, 1, 9, 9, 9]) == [3]
-    assert patterns.pivot_highs([1, 1, 1, 9, 1, 1, 1]) == [3]
     assert patterns.pivot_lows([9, 9, 9, 1, 1, 9, 9, 9]) == []  # a tie is not a pivot
     assert patterns.pivot_lows([9, 9, 1, 9, 9]) == []  # too close to the edge to be confirmed
-    assert patterns.pivot_highs([5.0] * 10) == []
+    assert patterns.pivot_lows([5.0] * 10) == []
 
 
 # #22 RSI bullish divergence: flat 100, a dip to 90 at L1 and a dip to `l2_price` at L2; today is index 59

@@ -7,10 +7,10 @@ Positions are sessions ago (0 = today). Every definition is in docs/plans/phase-
 import math
 from itertools import combinations
 
-from libs.analysis.features import Candles, Detection, mean
+from libs.analysis.features import Candles, Detection, mean, ramp
 from libs.indicators import Indicators
 
-PIVOT_SPAN = 3  # a pivot is lower / higher than this many sessions on each side, so it is confirmed 3 sessions late
+PIVOT_SPAN = 3  # a pivot beats this many sessions on each side, so it is confirmed 3 sessions late
 
 
 def pivot_lows(values: list[float], span: int = PIVOT_SPAN) -> list[int]:
@@ -20,20 +20,6 @@ def pivot_lows(values: list[float], span: int = PIVOT_SPAN) -> list[int]:
         for index in range(span, len(values) - span)
         if all(values[index] < values[index + offset] for offset in range(-span, span + 1) if offset)
     ]
-
-
-def pivot_highs(values: list[float], span: int = PIVOT_SPAN) -> list[int]:
-    """Indexes whose value is strictly above the `span` values before and the `span` after."""
-    return [
-        index
-        for index in range(span, len(values) - span)
-        if all(values[index] > values[index + offset] for offset in range(-span, span + 1) if offset)
-    ]
-
-
-def _share(value: float, start: float, end: float) -> float:
-    """Linear 0 at `start`, 1 at `end`, clamped (`start > end` for a falling ramp)."""
-    return min(1.0, max(0.0, (value - start) / (end - start)))
 
 
 # #22 RSI bullish divergence
@@ -73,7 +59,7 @@ def rsi_divergence(candles: Candles, engine: Indicators) -> Detection | float:
     )
     if not found:
         return 0.0
-    strength = _share(rsi_second - rsi_first, 0, DIVERGENCE_RSI_GAP) * _share(count - 1 - second, 25, 10)
+    strength = ramp(0, DIVERGENCE_RSI_GAP)(rsi_second - rsi_first) * ramp(25, 10)(count - 1 - second)
     details = {
         "l1_sessions_ago": count - 1 - first,
         "l1_rsi": rsi_first,
@@ -86,7 +72,7 @@ def rsi_divergence(candles: Candles, engine: Indicators) -> Detection | float:
 # #23 bullish reversal candle pattern
 
 PATTERN_STRENGTH = {"engulfing": 1.0, "morning_star": 1.0, "piercing": 0.8, "hammer": 0.7}
-PATTERN_RECENCY = (1.0, 0.6, 0.3)  # completed today, one session ago, two sessions ago
+RECENCY = (1.0, 0.6, 0.3)  # weight of a signal from today, one session ago, two sessions ago
 PATTERN_CONTEXT = -0.03  # the 5 sessions before the last candle must have fallen at least 3%
 VOLUME_WINDOW = 20
 
@@ -100,7 +86,7 @@ def candle_pattern(candles: Candles, engine: Indicators) -> Detection | float:
     flags = engine.bullish_patterns(candles.open, candles.high, candles.low, candles.close)
     best: float = 0.0
     found: dict[str, float | int | str | None] = {}
-    for sessions_ago, recency in enumerate(PATTERN_RECENCY):
+    for sessions_ago, recency in enumerate(RECENCY):
         index = len(candles) - 1 - sessions_ago
         if candles.high[index] == candles.low[index]:
             continue
@@ -123,7 +109,6 @@ LINE_TOLERANCE = 0.005  # no high may poke through the line by more than this
 TOUCH_TOLERANCE = 0.01  # a pivot high this close to the line touches it
 BREAKOUT_MARGIN = 0.01  # a breakout closes at least 1% above the line
 BREAKOUT_MAX = 0.07  # and must not have run more than 7% above it
-BREAKOUT_RECENCY = (1.0, 0.6, 0.3)  # broke out today, one session ago, two sessions ago
 
 
 def _best_line(highs: list[float], pivots: list[int], end: int) -> tuple[int, int, int] | None:
@@ -160,7 +145,8 @@ def trendline_breakout(candles: Candles, engine: Indicators) -> Detection | floa
     highs, close, count = candles.high, candles.close, len(candles)
     end = count - 4  # the line ends 3 sessions before today
     start = end - LINE_WINDOW + 1
-    pivots = [index for index in pivot_highs(highs) if start <= index <= count - 7]
+    upside_down = [-value for value in highs]  # a pivot high is a pivot low of the negated series
+    pivots = [index for index in pivot_lows(upside_down) if start <= index <= count - 7]
     line = _best_line(highs, pivots, end)
     if line is None:
         return 0.0
@@ -184,7 +170,7 @@ def trendline_breakout(candles: Candles, engine: Indicators) -> Detection | floa
     index = count - 1 - broke
     average = mean(candles.volume[index - VOLUME_WINDOW : index])
     volume_factor = 1.0 if average and candles.volume[index] >= 1.5 * average else 0.6
-    strength = BREAKOUT_RECENCY[broke] * volume_factor * (1.0 if touches >= 3 else 0.7)
+    strength = RECENCY[broke] * volume_factor * (1.0 if touches >= 3 else 0.7)
     details = {
         "anchor1_sessions_ago": count - 1 - first,
         "anchor2_sessions_ago": count - 1 - second,

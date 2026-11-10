@@ -36,7 +36,7 @@ A pre-market summary needs the state of the whole market, not only the shortlist
 
 - Summary language: Vietnamese (to be confirmed).
 - Describe only the data given; do not invent numbers; no buy/sell recommendations; end with a one-line "for reference only".
-- The input carries a 0–100 screening score per symbol with per-indicator points, raw values and flags. The summary may quote them, must not present the score as a recommendation, and must show a flag (ceiling-locked, suspected corporate action, new listing) next to any symbol that has one.
+- The input carries a 0–100 screening score per symbol with per-indicator points, raw values and flags. The summary may quote them, must not present the score as a recommendation, and must show a flag (ceiling-locked, new listing, low coverage) next to any symbol that has one.
 - A symbol marked `"insufficient data"` has no score and must not be given one; an `unavailable` indicator is reported as such, never guessed.
 - Write the currency as "đồng", **not** "VND" (see the check below).
 - The input is numbers and symbols only, no free text, so the prompt-injection risk is low.

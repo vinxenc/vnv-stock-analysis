@@ -14,17 +14,11 @@ Values = list[float]
 Series = list[float | None]
 Flags = dict[str, list[bool]]
 
-PATTERNS = ("engulfing", "hammer", "morning_star", "piercing")  # the bullish reversal patterns of indicator #23
-
 
 class Indicators(ABC):
     @abstractmethod
     def sma(self, values: Values, window: int) -> Series:
         """Simple moving average."""
-
-    @abstractmethod
-    def ema(self, values: Values, window: int) -> Series:
-        """Exponential moving average (smoothing 2 / (window + 1)), seeded with the SMA of the first window."""
 
     @abstractmethod
     def rsi(self, values: Values, window: int = 14) -> Series:
@@ -43,7 +37,7 @@ class Indicators(ABC):
 
     @abstractmethod
     def bullish_patterns(self, opens: Values, highs: Values, lows: Values, closes: Values) -> Flags:
-        """For each name in PATTERNS, one flag per row: the pattern is bullish and completes on that row.
+        """Keys engulfing, hammer, morning_star, piercing: one flag per row, true where the bullish pattern completes.
 
         The engine's own pattern definitions apply (a library may require a gap for the morning star and the piercing
         line, which HOSE's opening auction almost never produces).

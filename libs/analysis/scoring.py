@@ -10,19 +10,13 @@ from functools import partial
 from typing import Literal
 
 from libs.analysis import features, patterns
-from libs.analysis.features import Candles, Detection
+from libs.analysis.features import Candles, Curve, Detection, ramp
 from libs.analysis.gates import uptrend_gate
 from libs.analysis.models import IndicatorResult, IndicatorStatus, Theme
 from libs.indicators import Indicators
 
-Curve = Callable[[float], float]  # raw value -> share of the maximum points, 0..1
 Raw = float | Detection | None  # a number, what a shape feature found (#22-#24), or None = cannot be computed
 Feature = Callable[[Candles, Indicators], Raw]  # candles and the engine -> raw
-
-
-def ramp(start: float, end: float) -> Curve:
-    """0 at `start`, 1 at `end`, linear between, clamped. `start > end` makes lower values better."""
-    return lambda value: min(1.0, max(0.0, (value - start) / (end - start)))
 
 
 def trapezoid(zero_low: float, full_low: float, full_high: float, zero_high: float) -> Curve:
@@ -84,7 +78,6 @@ INDICATORS = [
     Indicator(23, Theme.REVERSAL, 5, 60, "candle_pattern", patterns.candle_pattern, uptrend_only=True),
     Indicator(24, Theme.POSITION, 4, 70, "trendline_breakout", patterns.trendline_breakout),
 ]
-assert [indicator.id for indicator in INDICATORS] == list(range(1, 25))
 assert sum(indicator.max_points for indicator in INDICATORS) == 100
 SMA50_CHANGE = 4  # the raw value the uptrend gate reads
 

@@ -1,7 +1,9 @@
 import datetime as dt
 
 from libs.db.models import Price
-from libs.indicators import PATTERNS, Flags, Indicators, Series, Values
+from libs.indicators import Flags, Indicators, Series, Values
+
+PATTERNS = ("engulfing", "hammer", "morning_star", "piercing")
 
 
 class StubIndicators(Indicators):
@@ -21,9 +23,6 @@ class StubIndicators(Indicators):
         return [self.value] * len(values)
 
     def sma(self, values: Values, window: int) -> Series:
-        return self._constant(values)
-
-    def ema(self, values: Values, window: int) -> Series:
         return self._constant(values)
 
     def rsi(self, values: Values, window: int = 14) -> Series:

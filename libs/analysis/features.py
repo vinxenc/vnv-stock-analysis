@@ -7,10 +7,19 @@ as its second parameter and never imports a library; the others only look at the
 plan's minimum-rows column: "N + 1 rows" means N sessions before today, or N one-day changes.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from libs.db.models import Price
 from libs.indicators import Indicators
+
+Curve = Callable[[float], float]  # raw value -> share of the maximum points, 0..1
+
+
+def ramp(start: float, end: float) -> Curve:
+    """0 at `start`, 1 at `end`, linear between, clamped. `start > end` makes lower values better."""
+    return lambda value: min(1.0, max(0.0, (value - start) / (end - start)))
+
 
 UP_DOWN_CAP = 10.0  # up/down volume ratio when nothing was sold: well above the ramp's top, finite for the JSON
 CROSS_AGE_CAP = 6.0  # a MACD cross older than this scores nothing, so the age stops counting here
@@ -46,10 +55,6 @@ class Candles:
         return len(self.close)
 
 
-def _last(values: list[float | None]) -> float | None:
-    return values[-1]
-
-
 def mean(values: list[float]) -> float:
     return sum(values) / len(values)
 
@@ -63,14 +68,14 @@ def _is_up(candles: Candles, index: int) -> bool:
 
 def close_vs_sma(candles: Candles, engine: Indicators, window: int) -> float | None:
     """#1, #2, #5, #19: close / SMA(window) - 1."""
-    average = _last(engine.sma(candles.close, window))
+    average = engine.sma(candles.close, window)[-1]
     return None if average is None else candles.close[-1] / average - 1
 
 
 def sma_short_above_long(candles: Candles, engine: Indicators, short: int = 20, long: int = 50) -> float | None:
     """#3: 1.0 when SMA20 > SMA50, else 0.0."""
-    short_average = _last(engine.sma(candles.close, short))
-    long_average = _last(engine.sma(candles.close, long))
+    short_average = engine.sma(candles.close, short)[-1]
+    long_average = engine.sma(candles.close, long)[-1]
     if short_average is None or long_average is None:
         return None
     return float(short_average > long_average)
@@ -93,12 +98,12 @@ def period_return(candles: Candles, sessions: int) -> float:
 
 def rsi_value(candles: Candles, engine: Indicators, window: int = 14) -> float | None:
     """#8: Wilder RSI of today."""
-    return _last(engine.rsi(candles.close, window))
+    return engine.rsi(candles.close, window)[-1]
 
 
 def ppo_histogram_now(candles: Candles, engine: Indicators) -> float | None:
     """#9: PPO histogram of today (fraction of price)."""
-    return _last(engine.ppo_histogram(candles.close))
+    return engine.ppo_histogram(candles.close)[-1]
 
 
 def ppo_histogram_change(candles: Candles, engine: Indicators, lag: int = 3) -> float | None:
@@ -175,7 +180,7 @@ def higher_lows(candles: Candles, window: int = 10) -> float:
 def return_volatility(candles: Candles, engine: Indicators, window: int = 20) -> float | None:
     """#20: standard deviation of the last `window` daily returns (ranked, lower is better)."""
     returns = [candles.close[index] / candles.close[index - 1] - 1 for index in range(1, len(candles))]
-    return _last(engine.stddev(returns, window))
+    return engine.stddev(returns, window)[-1]
 
 
 def no_distribution_day(candles: Candles, lookback: int = 10, window: int = 20) -> float | None:

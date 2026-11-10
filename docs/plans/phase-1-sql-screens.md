@@ -1,6 +1,6 @@
 # Phase 1 — Screens and analysis (no LLM)
 
-Status: **draft checklist for discussion** (2026-10-28). Next phase: [phase-2-llm-summary.md](phase-2-llm-summary.md).
+Status: **built, waiting for the first real run on GitHub** (2026-11-10): steps 1–4 are implemented, see "Decisions and open items" and the checklist of step 4. Next phase: [phase-2-llm-summary.md](phase-2-llm-summary.md).
 
 Option 1 = "build a short list from the data, then one LLM call writes the summary", split into 2 phases: **Phase 1 has no LLM**, Phase 2 adds the LLM call.
 
@@ -18,11 +18,12 @@ Decided by the user:
 - Ranking: one composite score 0–100, buy side, trend / breakout profile, the 24-indicator table below.
 - Library for the indicators: **TA-Lib** (see "Libraries").
 
-Open, for the next session to decide:
-- The ponytail simplification suggestions ("Simplification suggestions" below; #5 is done, the others are open).
-- Candle patterns: hand-written gap-free versions or TA-Lib's gap-based ones.
-- Who fills the history in `prices`, and when.
-- Weights, thresholds and the listing threshold, after the real score distribution is visible.
+Decided 2026-11-10 (building step 4; its build checklist was deleted once built, see the git history of `docs/plans/phase-1-step4-analyze-checklist.md`): `vn_stock_get_history` stays its own job (suggestion #1 rejected); candle patterns are TA-Lib's own definitions, the gap handling is fixed later in another pipeline; the history in `prices` comes from the seed migration and the daily sync; the stored history is taken as correct (no missing-session or corporate-action gates); #22–#24 ship with #1–#21; TA-Lib sits behind the `Indicators` interface.
+
+Open, for the tuning pass (needs the real score distribution):
+- Weights, thresholds and the listing threshold; re-measure the warm-up minimums (#8–#11).
+- Plot the detected divergences and trendlines for about 20 real symbols before trusting #22 and #24.
+- Whether to add the hidden bullish divergence.
 
 ## Flow
 
@@ -44,7 +45,7 @@ Out of scope for Phase 1: the LLM call (Phase 2), an agent that explores the dat
 
 ## Assumptions
 
-- `prices` already holds enough history for the shortlisted symbols (the length is set in step 3). Backfilling it is a separate task, not part of Phase 1. Today the table only has the days stored since 2026-10-27, so until a backfill runs (61 rows are needed to get a score), every symbol will be `"insufficient data"`.
+- `prices` holds enough history for the shortlisted symbols (260 sessions, set in step 3). It comes from the seed migration `0003_seed_prices` (2025-01-02..2026-11-06, real DNSE history) plus the daily sync; backfilling stays a separate task. The analysis takes the stored history as correct and does not re-check it (decided 2026-11-10).
 
 ## Checklist
 
@@ -84,22 +85,22 @@ Every new job follows the existing pattern: `environment: production` when it ne
 
 ### 4. `vn_stock_analyze` — indicators, gates, score (heaviest)
 
-- [ ] Job `vn_stock_analyze`, `needs: vn_stock_get_history`, no DB secret. Input: the `vn-stock-history` artifact.
-- [ ] Stages, as plain functions in one job: load and validate → features per symbol → signal flags → ranking → output.
-- [ ] Libraries: TA-Lib (runtime dependency) for the standard indicators, stdlib for everything else. Details, verified facts and open points in "Libraries".
-- [ ] Computation by **rows**, never calendar dates (holidays). A symbol must have a row on today's session; keep only symbols with a row on the preceding session too, put the others in a "missing previous session" list and count them. An indicator with too little history is `unavailable` and a symbol below the coverage gate is `"insufficient data"` (see Scoring design); neither is ever a failure.
-- [ ] When a one-day change is beyond the HOSE band (±7%, to be verified), label the symbol "suspected corporate action" **and exclude it from every feature whose window contains that day** (returns, moving averages, highs/lows, volume average); otherwise one ex-rights day skews its features for 20–50 sessions. See Notes.
-- [ ] Output `out/vn_stock_analysis.json` (pydantic model; Phase 2 reads it, so keep it stable): `as_of`, shortlist coverage (e.g. 120 of 406 symbols), counts of `insufficient data` and flagged symbols, sources used, and one entry per symbol as described in "Output per symbol". Upload it as artifact `vn-stock-analysis`.
-- [ ] Render the ranked symbols (score, coverage, theme subtotals, flags) as a markdown table into `$GITHUB_STEP_SUMMARY`.
-- [ ] Tests: holiday gap, missing session, halted symbol, too little history, a fake drop, every gate, and one test per indicator.
-- [ ] Ranking = **one composite score per symbol, 0–100, buy side first** (trend / breakout profile). The indicator table, gates and output are in "Scoring design" below. In code: one config table (id, theme, max points, thresholds, direction, minimum rows), an assertion that the maximums add up to exactly 100, one small pure function per indicator, and a test per indicator.
+- [x] Job `vn_stock_analyze`, `needs: vn_stock_get_history`, no DB secret. Input: the `vn-stock-history` artifact.
+- [x] Stages, as plain functions in one job: load and validate → features per symbol → signal flags → ranking → output. Built as `libs/analysis` (features, gates, scoring, report, summary) called by `scripts/vn_stock_analyze.py`; no "validate" stage: the stored history is taken as correct (2026-11-10).
+- [x] Libraries: TA-Lib (runtime dependency) for the standard indicators, stdlib for everything else. Details, verified facts and open points in "Libraries". Behind the `Indicators` interface in `libs/indicators` (a new library is a new subclass).
+- [~] Computation by **rows**, never calendar dates (holidays). A symbol must have a row on today's session; keep only symbols with a row on the preceding session too, put the others in a "missing previous session" list and count them. An indicator with too little history is `unavailable` and a symbol below the coverage gate is `"insufficient data"` (see Scoring design); neither is ever a failure. **Dropped in part (2026-11-10):** it computes by rows, but there is no preceding-session list or "missing previous session" count: the history is taken as correct.
+- [~] When a one-day change is beyond the HOSE band (±7%, to be verified), label the symbol "suspected corporate action" **and exclude it from every feature whose window contains that day** (returns, moving averages, highs/lows, volume average); otherwise one ex-rights day skews its features for 20–50 sessions. See Notes. **Dropped (2026-11-10):** no corporate-action detection, no flag; see the note under "Gates and exclusions".
+- [x] Output `out/vn_stock_analysis.json` (pydantic model; Phase 2 reads it, so keep it stable): `as_of`, shortlist coverage (e.g. 120 of 406 symbols), counts of `insufficient data` and flagged symbols, sources used, and one entry per symbol as described in "Output per symbol". Upload it as artifact `vn-stock-analysis`. Contract in `libs/analysis/models.py`; the shortlist size is `len(symbols)`, the counts (scored, insufficient data, flagged) are derived from `symbols` and there is no missing-session list or `status` field (`score` is null for "insufficient data").
+- [x] Render the ranked symbols (score, coverage, theme subtotals, flags) as a markdown table into `$GITHUB_STEP_SUMMARY`.
+- [x] Tests: holiday gap, missing session, halted symbol, too little history, a fake drop, every gate, and one test per indicator. The holiday-gap, missing-session and fake-drop cases went with the dropped gates.
+- [x] Ranking = **one composite score per symbol, 0–100, buy side first** (trend / breakout profile). The indicator table, gates and output are in "Scoring design" below. In code: one config table (id, theme, max points, thresholds, direction, minimum rows), an assertion that the maximums add up to exactly 100, one small pure function per indicator, and a test per indicator.
 
 ### 5. Done when
 
-- [ ] A manual run against a local DB with fake data gives the right shortlist, history and JSON.
-- [ ] A real `workflow_dispatch` run shows the score table in the job summary.
-- [ ] A day off: all jobs after `is_holiday` are skipped. A failed sync (no bar for today): `vn_stock_screen` fails instead of reporting old data. The sync workflow's cron and jobs are unchanged.
-- [ ] `uv run pytest` ≥ 95% coverage, ruff clean.
+- [x] A manual run against a local DB with fake data gives the right shortlist, history and JSON. Done on the real local database (sync of 2026-11-10 plus the DNSE bars of 2026-11-09): 88 symbols screened, 87 scored.
+- [ ] A real `workflow_dispatch` run shows the score table in the job summary. **Not done yet: needs a push and a run on GitHub.**
+- [ ] A day off: all jobs after `is_holiday` are skipped. A failed sync (no bar for today): `vn_stock_screen` fails instead of reporting old data. The sync workflow's cron and jobs are unchanged. **Not verified on GitHub yet** (the screen's stale-session failure is covered by its unit tests).
+- [x] `uv run pytest` ≥ 95% coverage, ruff clean. (98.1%)
 
 ## Scoring design (buy side, trend / breakout profile)
 
@@ -185,7 +186,7 @@ About three quarters of the points come from price (trend, momentum, position, r
 - **Checked** once in a throwaway environment on synthetic prices (nothing was kept; re-verify when implementing):
   - `talib.EMA` and `talib.RSI` equal the plan's definitions at every row (SMA-seeded EMA; Wilder RSI seeded with the average of the first 14 changes): every row of 50 series of 300 rows, maximum difference about 1e-13. `SMA` too.
   - `talib.MACD` does **not**: it is absolute (not price-normalised) and seeds its fast EMA differently, so it agrees with the plan only after about 150–200 rows. Use `ppo = talib.PPO(close, 12, 26, matype=1) / 100`, then `histogram = ppo - talib.EMA(ppo, 9)` on the non-NaN part. This reproduces the plan's PPO histogram (maximum difference 7e-18).
-  - `talib.CDLMORNINGSTAR` and `talib.CDLPIERCING` fired only on patterns **with a gap** and returned 0 on the gap-free variants; `CDLENGULFING` and `CDLHAMMER` fired as expected (one hand-built example per case, not a statistical test). The plan defines all four gap-free because HOSE opens through the ATO auction. Open: hand-write morning star and piercing line (a few lines of stdlib each), or accept TA-Lib's gap-based definitions, which will rarely fire on HOSE.
+  - `talib.CDLMORNINGSTAR` and `talib.CDLPIERCING` fired only on patterns **with a gap** and returned 0 on the gap-free variants; `CDLENGULFING` and `CDLHAMMER` fired as expected (one hand-built example per case, not a statistical test). The plan defines all four gap-free because HOSE opens through the ATO auction. Decided 2026-11-10: use TA-Lib's own definitions (through `Indicators.bullish_patterns`); the two gap-based patterns will rarely fire on HOSE, and the gap handling is fixed later in another pipeline.
 - **Boundary:** TA-Lib returns numpy arrays padded with NaN. Convert NaN to `None` ("unavailable") at the boundary and keep pydantic models for results (README code rules).
 - **Warm-up table:** the min-rows column was measured with stdlib prototypes whose EMA, RSI and PPO equal TA-Lib's, so it holds. Re-measure only if `talib.MACD` is used instead of the PPO recipe above.
 - **Tests:** golden values from TA-Lib are circular when TA-Lib is also the runtime library. Test the wiring (thresholds, NaN → `None`, gates, ramps) on small hand-computed series, and use hand-built candles for the gap-free patterns.
@@ -205,7 +206,7 @@ Speed does not matter at this size (all are far below one second against a 20-mi
 
 ### Gates and exclusions
 
-**Superseded (2026-11-10):** the Missing session and Corporate action rows below are dropped; `vn_stock_analyze` takes the stored history as correct, see [phase-1-step4-analyze-checklist.md](phase-1-step4-analyze-checklist.md). Phase 2's `suspected corporate action` flag goes with them.
+**Superseded (2026-11-10):** the Missing session and Corporate action rows below are dropped; `vn_stock_analyze` takes the stored history as correct, see "Decisions and open items" above. Phase 2's `suspected corporate action` flag goes with them.
 
 | Gate | Rule |
 |---|---|
@@ -242,7 +243,7 @@ The floor is 61 rows with a margin of 2 points. Any new indicator with a longer 
 
 ## Simplification suggestions (ponytail review)
 
-From a `/ponytail-review` of these plans on 2026-10-28. The agent that reads this document decides which to apply. #5 and #2 are applied so far; the others are still open. Rough saving: about 400 lines of code and yaml that are not written yet (about 250 of them only deferred).
+From a `/ponytail-review` of these plans on 2026-10-28. Outcome (2026-11-10): #2, #5 and #6 applied; #1 rejected (the user wants independent jobs); #4 not applied (#22–#24 ship with the rest); #3, #7, #8 not applicable or dropped. Rough saving: about 400 lines of code and yaml that are not written yet (about 250 of them only deferred).
 
 1. **Merge `vn_stock_get_history` into `vn_stock_screen`** (steps 2 and 3): same database, same session, so one runner and one artifact hop less and about 35 lines of yaml; `vn_stock_analyze` still gets no database secret. The user designed four jobs, so this is the user's call.
 2. **Defer `market.json`** (breadth, median change) to Phase 2: no indicator uses it any more. **Done** (decided 2026-11-06; tracked in Phase 2).
@@ -273,9 +274,9 @@ All 3 sources return **adjusted** prices (`vndirect.py` reads the `ad*` fields t
 
 ### Open questions
 
-1. How to compute in `vn_stock_analyze`: SQL window functions, or plain Python on the history artifact?
+1. ~~How to compute in `vn_stock_analyze`~~ Plain Python on the history artifact (done).
 2. Weights and thresholds: tune them after seeing the real score distribution. Also decide whether to add the hidden bullish divergence, and where to set the listing threshold.
-3. History length N for step 3: 260 recommended (see Minimum history).
-4. Who fills the history in `prices`, and when (the Assumption above)?
-5. Candle patterns with TA-Lib: hand-write the gap-free morning star and piercing line, or accept TA-Lib's gap-based ones?
-6. Which of the ponytail suggestions to apply?
+3. ~~History length N~~ 260 (done, `SESSIONS`).
+4. ~~Who fills the history in `prices`~~ The seed migration `0003_seed_prices` plus the daily sync.
+5. ~~Candle patterns with TA-Lib~~ TA-Lib's own definitions; gap handling later, in another pipeline.
+6. ~~Which of the ponytail suggestions to apply~~ #2, #5, #6 applied; #1 rejected; #3, #4, #7, #8 not applicable or dropped.

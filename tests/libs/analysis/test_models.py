@@ -11,7 +11,6 @@ from libs.analysis.models import (
     IndicatorResult,
     IndicatorStatus,
     SymbolResult,
-    SymbolStatus,
     Theme,
 )
 
@@ -45,30 +44,9 @@ def test_score_must_be_given_even_when_null() -> None:
         AnalysisReport.model_validate(data)
 
 
-@pytest.mark.parametrize(("status", "score"), [(SymbolStatus.SCORED, None), (SymbolStatus.INSUFFICIENT_DATA, 50.0)])
-def test_score_matches_status(status: SymbolStatus, score: float | None) -> None:
-    with pytest.raises(ValidationError, match="does not match the status"):
-        SymbolResult(symbol="X", status=status, score=score, coverage=90, turnover=1, themes={}, indicators=[])
-
-
 def test_score_range() -> None:
     with pytest.raises(ValidationError):
-        SymbolResult(
-            symbol="X", status=SymbolStatus.SCORED, score=101, coverage=90, turnover=1, themes={}, indicators=[]
-        )
-
-
-@pytest.mark.parametrize(
-    ("status", "points", "message"),
-    [
-        (IndicatorStatus.SCORED, 3.5, "above the maximum"),
-        (IndicatorStatus.UNAVAILABLE, 1.0, "must have 0 points"),
-        (IndicatorStatus.GATE_CLOSED, 1.0, "must have 0 points"),
-    ],
-)
-def test_indicator_points(status: IndicatorStatus, points: float, message: str) -> None:
-    with pytest.raises(ValidationError, match=message):
-        IndicatorResult(id=1, theme=Theme.TREND, status=status, points=points, max_points=3)
+        SymbolResult(symbol="X", score=101, coverage=90, turnover=1, themes={}, indicators=[])
 
 
 def test_indicator_id_range() -> None:

@@ -20,9 +20,6 @@ class TalibIndicators(Indicators):
     def sma(self, values: Values, window: int) -> Series:
         return _clean(talib.SMA(_array(values), window))
 
-    def ema(self, values: Values, window: int) -> Series:
-        return _clean(talib.EMA(_array(values), window))
-
     def rsi(self, values: Values, window: int = 14) -> Series:
         return _clean(talib.RSI(_array(values), window))
 

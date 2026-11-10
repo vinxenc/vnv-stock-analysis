@@ -2,7 +2,7 @@
 
 import pytest
 
-from libs.indicators import PATTERNS, Indicators, TalibIndicators
+from libs.indicators import Indicators, TalibIndicators
 
 ENGINES: list[Indicators] = [TalibIndicators()]
 
@@ -14,11 +14,6 @@ def engine(request: pytest.FixtureRequest) -> Indicators:
 
 def test_sma_pads_the_start_with_none_and_accepts_plain_floats(engine: Indicators) -> None:
     assert engine.sma([1.0, 2.0, 3.0, 4.0], 3) == [None, None, 2.0, 3.0]
-
-
-def test_ema_is_seeded_with_the_sma_of_the_first_window(engine: Indicators) -> None:
-    # window 3: seed = mean(1, 2, 3) = 2; next = 2 + 0.5 * (4 - 2) = 3 (smoothing 2 / (3 + 1))
-    assert engine.ema([1.0, 2.0, 3.0, 4.0], 3) == [None, None, 2.0, 3.0]
 
 
 def test_rsi_of_a_series_that_only_rises_or_only_falls(engine: Indicators) -> None:
@@ -48,7 +43,7 @@ def test_ppo_histogram_of_a_series_shorter_than_the_slow_window_has_no_value(eng
 
 def test_one_output_per_input_row(engine: Indicators) -> None:
     values = [float(i) for i in range(1, 61)]
-    for series in (engine.sma(values, 5), engine.ema(values, 5), engine.rsi(values), engine.stddev(values, 5)):
+    for series in (engine.sma(values, 5), engine.rsi(values), engine.stddev(values, 5)):
         assert len(series) == len(values)
     assert len(engine.ppo_histogram(values)) == len(values)
 
@@ -75,7 +70,7 @@ def candles_ending_with(open_: float, close: float, low: float | None = None, hi
 def test_bullish_patterns_answer_every_name_with_one_flag_per_row(engine: Indicators) -> None:
     opens, highs, lows, closes = candles_ending_with(95.0, 101.0)
     flags = engine.bullish_patterns(opens, highs, lows, closes)
-    assert set(flags) == set(PATTERNS)
+    assert set(flags) == {"engulfing", "hammer", "morning_star", "piercing"}
     assert all(len(values) == len(closes) for values in flags.values())
 
 

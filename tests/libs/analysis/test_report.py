@@ -2,7 +2,7 @@ import datetime as dt
 
 import pytest
 
-from libs.analysis.models import Flag, SymbolResult, SymbolStatus, Theme
+from libs.analysis.models import Flag, SymbolResult, Theme
 from libs.analysis.report import build_report, rank
 from libs.indicators import TalibIndicators
 from tests.libs.analysis.fakes import make_rows
@@ -11,10 +11,7 @@ OLD = dt.date(2016, 1, 1)
 
 
 def result(symbol: str, score: float | None, turnover: float) -> SymbolResult:
-    status = SymbolStatus.SCORED if score is not None else SymbolStatus.INSUFFICIENT_DATA
-    return SymbolResult(
-        symbol=symbol, status=status, score=score, coverage=100, turnover=turnover, themes={}, indicators=[]
-    )
+    return SymbolResult(symbol=symbol, score=score, coverage=100, turnover=turnover, themes={}, indicators=[])
 
 
 def test_rank_by_score_then_turnover_with_unscored_symbols_last() -> None:
@@ -38,12 +35,12 @@ def test_build_report_scores_ranks_and_counts() -> None:
 
     assert report.as_of == dt.date(2026, 11, 10)
     assert report.universe_size == 4  # the symbols of data/hose_symbols.csv, not only the shortlist
-    assert (report.scored, report.insufficient_data, report.flagged) == (1, 2, 2)  # SHORT and ONE
+    assert [item.score is not None for item in report.symbols].count(True) == 1  # UP only
     assert report.sources == ["A"]
     assert [item.symbol for item in report.symbols][0] == "UP"  # the only scored symbol comes first
 
     up = report.symbols[0]
-    assert up.status == SymbolStatus.SCORED and up.coverage == 100 and up.flags == []
+    assert up.score is not None and up.coverage == 100 and up.flags == []
     assert up.score == pytest.approx(sum(indicator.points for indicator in up.indicators), abs=0.01)
     assert up.score == pytest.approx(sum(up.themes.values()), abs=0.03)
     assert set(up.themes) == set(Theme)
@@ -53,10 +50,10 @@ def test_build_report_scores_ranks_and_counts() -> None:
     assert up.turnover == pytest.approx(sum(row.close * row.volume for row in rows) / 20)
 
     short = next(item for item in report.symbols if item.symbol == "SHORT")
-    assert short.status == SymbolStatus.INSUFFICIENT_DATA and short.score is None
+    assert short.score is None
     assert Flag.NEW_LISTING in short.flags and Flag.LOW_COVERAGE in short.flags
     one = next(item for item in report.symbols if item.symbol == "ONE")  # one row: no previous close, no crash
-    assert one.status == SymbolStatus.INSUFFICIENT_DATA and one.flags == [Flag.LOW_COVERAGE]
+    assert one.score is None and one.flags == [Flag.LOW_COVERAGE]
 
 
 def test_sources_are_the_ones_of_the_session_analysed() -> None:

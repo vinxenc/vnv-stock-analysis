@@ -4,7 +4,7 @@ import datetime as dt
 
 from libs.analysis import gates, scoring
 from libs.analysis.features import Candles, mean
-from libs.analysis.models import AnalysisReport, IndicatorResult, SymbolResult, SymbolStatus, Theme
+from libs.analysis.models import AnalysisReport, IndicatorResult, SymbolResult, Theme
 from libs.db.models import Price
 from libs.indicators import Indicators
 
@@ -16,7 +16,6 @@ def symbol_result(
     symbol: str, candles: Candles, indicators: list[IndicatorResult], listed_date: dt.date, as_of: dt.date
 ) -> SymbolResult:
     available = gates.available_points(indicators)
-    status = gates.symbol_status(available)
     points = sum(item.points for item in indicators)
     turnover = mean(
         [close * volume for close, volume in zip(candles.close, candles.volume, strict=True)][-TURNOVER_SESSIONS:]
@@ -24,8 +23,7 @@ def symbol_result(
     previous_close = candles.close[-2] if len(candles) > 1 else candles.close[-1]
     return SymbolResult(
         symbol=symbol,
-        status=status,
-        score=round(points, 2) if status == SymbolStatus.SCORED else None,
+        score=round(points, 2) if gates.is_scored(available) else None,
         coverage=available,
         turnover=turnover,
         themes={theme: round(sum(i.points for i in indicators if i.theme == theme), 2) for theme in Theme},
@@ -57,13 +55,9 @@ def build_report(history: History, listed_dates: dict[str, dt.date], engine: Ind
             for symbol in history
         ]
     )
-    scored = sum(result.status == SymbolStatus.SCORED for result in results)
     return AnalysisReport(
         as_of=as_of,
         universe_size=len(listed_dates),
-        scored=scored,
-        insufficient_data=len(results) - scored,
-        flagged=sum(bool(result.flags) for result in results),
         sources=sorted({rows[-1].source for rows in history.values()}),
         symbols=results,
     )

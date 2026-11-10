@@ -5,7 +5,7 @@ The stored history is taken as correct, so there is no corporate-action or missi
 
 import datetime as dt
 
-from libs.analysis.models import Flag, IndicatorResult, IndicatorStatus, SymbolStatus
+from libs.analysis.models import Flag, IndicatorResult, IndicatorStatus
 
 MIN_AVAILABLE_POINTS = 80  # a symbol is scored only when the indicators it could compute are worth at least this
 LOW_COVERAGE_POINTS = 90  # below this the score rests on few indicators: show the flag
@@ -19,9 +19,9 @@ def available_points(indicators: list[IndicatorResult]) -> float:
     return sum(item.max_points for item in indicators if item.status != IndicatorStatus.UNAVAILABLE)
 
 
-def symbol_status(available: float) -> SymbolStatus:
+def is_scored(available: float) -> bool:
     """Coverage gate: below MIN_AVAILABLE_POINTS there is no score, so a few cheap indicators cannot reach 100."""
-    return SymbolStatus.SCORED if available >= MIN_AVAILABLE_POINTS else SymbolStatus.INSUFFICIENT_DATA
+    return available >= MIN_AVAILABLE_POINTS
 
 
 def uptrend_gate(sma50_change: float | None) -> IndicatorStatus | None:

@@ -2,8 +2,8 @@ import datetime as dt
 
 import pytest
 
-from libs.analysis.gates import available_points, flags, symbol_status, uptrend_gate
-from libs.analysis.models import Flag, IndicatorResult, IndicatorStatus, SymbolStatus, Theme
+from libs.analysis.gates import available_points, flags, is_scored, uptrend_gate
+from libs.analysis.models import Flag, IndicatorResult, IndicatorStatus, Theme
 
 AS_OF = dt.date(2026, 11, 10)
 OLD = dt.date(2016, 11, 25)
@@ -23,12 +23,9 @@ def test_available_points_count_scored_and_gate_closed_but_not_unavailable() -> 
     assert available_points([]) == 0
 
 
-@pytest.mark.parametrize(
-    ("available", "status"),
-    [(79.9, SymbolStatus.INSUFFICIENT_DATA), (80, SymbolStatus.SCORED), (100, SymbolStatus.SCORED)],
-)
-def test_coverage_gate_edge(available: float, status: SymbolStatus) -> None:
-    assert symbol_status(available) == status
+@pytest.mark.parametrize(("available", "scored"), [(79.9, False), (80, True), (100, True)])
+def test_coverage_gate_edge(available: float, scored: bool) -> None:
+    assert is_scored(available) is scored
 
 
 @pytest.mark.parametrize(

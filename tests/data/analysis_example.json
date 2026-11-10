@@ -1,9 +1,6 @@
 {
   "as_of": "2026-11-10",
   "universe_size": 406,
-  "scored": 1,
-  "insufficient_data": 1,
-  "flagged": 2,
   "sources": [
     "DNSE",
     "VNDirect"
@@ -11,7 +8,6 @@
   "symbols": [
     {
       "symbol": "HPG",
-      "status": "scored",
       "score": 71.5,
       "coverage": 98.0,
       "turnover": 1250000000.0,
@@ -59,7 +55,6 @@
     },
     {
       "symbol": "LPS",
-      "status": "insufficient data",
       "score": null,
       "coverage": 62.0,
       "turnover": 21000000.0,
