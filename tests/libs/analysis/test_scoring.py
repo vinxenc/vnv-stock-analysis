@@ -1,10 +1,11 @@
 import pytest
 
 from libs.analysis import scoring
-from libs.analysis.features import Candles
-from libs.analysis.indicators import Indicators, TalibIndicators
-from libs.analysis.models import IndicatorStatus, Theme
+from libs.analysis.features import Candles, Detection
+from libs.analysis.indicators import TalibIndicators
+from libs.analysis.models import IndicatorResult, IndicatorStatus, Theme
 from libs.analysis.scoring import INDICATORS, percentile_rank, ramp, trapezoid
+from tests.libs.analysis.fakes import StubIndicators
 
 ENGINE = TalibIndicators()
 
@@ -59,9 +60,9 @@ def test_minimum_rows_decide_availability() -> None:
     assert scoring.raw_values(candles(0), ENGINE).keys() == set(range(1, 25))
     assert all(value is None for value in scoring.raw_values(candles(0), ENGINE).values())
     available = {id_: value is not None for id_, value in scoring.raw_values(candles(60), ENGINE).items()}
-    # 60 rows of a flat price: out are #5, #7 (61 rows), #9, #11, #17 (250), the unbuilt #22-#24, and two that a flat
+    # 60 rows of a flat price: out are #5, #7 (61 rows), #9, #11, #17 (250), #24 (70 rows), and two that a flat
     # price cannot compute: #13 (nothing moved) and #15 (high == low)
-    assert [id_ for id_, ok in available.items() if not ok] == [5, 7, 9, 11, 13, 15, 17, 22, 23, 24]
+    assert [id_ for id_, ok in available.items() if not ok] == [5, 7, 9, 11, 13, 15, 17, 24]
     # #10 needs 55 rows (a TA-Lib value exists earlier), #8 needs 45: both are in at 60
     assert available[8] and available[10]
 
@@ -102,32 +103,44 @@ def test_score_indicators() -> None:
     assert len(results) == 24
 
 
-class ConstantIndicators(Indicators):
-    """A stand-in engine: every series is the same number, so the result shows which engine a feature really used."""
-
-    def __init__(self, value: float) -> None:
-        self.value = value
-
-    def sma(self, values: list[float], window: int) -> list[float | None]:
-        return [self.value] * len(values)
-
-    ema = sma
-
-    def rsi(self, values: list[float], window: int = 14) -> list[float | None]:
-        return [self.value] * len(values)
-
-    def stddev(self, values: list[float], window: int) -> list[float | None]:
-        return [self.value] * len(values)
-
-    def ppo_histogram(self, values: list[float], fast: int = 12, slow: int = 26, signal: int = 9) -> list[float | None]:
-        return [self.value] * len(values)
-
-
 def test_the_engine_is_injected_not_imported() -> None:
     """Swapping the library is passing another `Indicators`: RSI #8 and the SMA gap #1 follow the engine given."""
     flat = candles(60)
-    engine_a = scoring.raw_values(flat, ConstantIndicators(50.0))
+    engine_a = scoring.raw_values(flat, StubIndicators(50.0))
     assert engine_a[8] == 50.0  # rsi
     assert engine_a[1] == pytest.approx(100 / 50 - 1)  # close 100 over an "SMA" of 50
     assert engine_a[6] == 0.0  # a candles-only feature does not use the engine
     assert scoring.raw_values(flat, ENGINE)[1] == 0.0  # the real engine on the same candles: a flat price, no gap
+
+
+def full_raw(**raw: float | Detection | None) -> dict[int, float | Detection | None]:
+    """Every indicator unavailable except the ones given as `r4=...`."""
+    base: dict[int, float | Detection | None] = {indicator.id: None for indicator in INDICATORS}
+    base.update({int(name[1:]): value for name, value in raw.items()})
+    return base
+
+
+def by_id(raw: dict[int, float | Detection | None]) -> dict[int, IndicatorResult]:
+    return {result.id: result for result in scoring.score_indicators(raw, {})}
+
+
+def test_reversal_indicators_count_only_while_sma50_is_not_falling() -> None:
+    found = Detection(0.5, {"pattern": "engulfing"})
+    open_gate = by_id(full_raw(r4=0.01, r22=found, r23=found))
+    assert open_gate[22].status == IndicatorStatus.SCORED
+    assert open_gate[22].points == pytest.approx(2.5)  # 5 x 0.5
+    assert open_gate[22].raw == {"rsi_divergence": 0.5, "pattern": "engulfing"}  # the facts travel with the points
+
+    closed = by_id(full_raw(r4=-0.01, r22=found, r23=found))
+    assert closed[22].status == closed[23].status == IndicatorStatus.GATE_CLOSED
+    assert closed[22].points == 0 and closed[22].raw == {"sma50_change": -0.01}
+
+    unknown = by_id(full_raw(r22=found, r23=found))  # #4 could not be computed: the gate cannot be judged
+    assert unknown[22].status == unknown[23].status == IndicatorStatus.UNAVAILABLE
+
+
+def test_gate_does_not_touch_the_trendline_and_an_unavailable_reversal_stays_unavailable() -> None:
+    results = by_id(full_raw(r4=-0.01, r24=Detection(1.0, {"touches": 3}), r22=None))
+    assert results[24].status == IndicatorStatus.SCORED and results[24].points == 4  # #24 is not gated
+    assert results[24].raw == {"trendline_breakout": 1.0, "touches": 3}
+    assert results[22].status == IndicatorStatus.UNAVAILABLE  # too few rows beats a closed gate

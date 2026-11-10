@@ -1,4 +1,4 @@
-from .base import Indicators, Series, Values
+from .base import PATTERNS, Flags, Indicators, Series, Values
 from .talib_engine import TalibIndicators
 
-__all__ = ["Indicators", "Series", "TalibIndicators", "Values"]
+__all__ = ["PATTERNS", "Flags", "Indicators", "Series", "TalibIndicators", "Values"]

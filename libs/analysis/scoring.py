@@ -9,13 +9,15 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Literal
 
-from libs.analysis import features
-from libs.analysis.features import Candles
+from libs.analysis import features, patterns
+from libs.analysis.features import Candles, Detection
+from libs.analysis.gates import uptrend_gate
 from libs.analysis.indicators import Indicators
 from libs.analysis.models import IndicatorResult, IndicatorStatus, Theme
 
 Curve = Callable[[float], float]  # raw value -> share of the maximum points, 0..1
-Feature = Callable[[Candles, Indicators], float | None]  # candles and the engine -> raw value, None = cannot compute
+Raw = float | Detection | None  # a number, what a shape feature found (#22-#24), or None = cannot be computed
+Feature = Callable[[Candles, Indicators], Raw]  # candles and the engine -> raw
 
 
 def ramp(start: float, end: float) -> Curve:
@@ -48,16 +50,12 @@ class Indicator:
     feature: Feature
     curve: Curve = ramp(0, 1)
     rank: Literal["high", "low"] | None = None  # ranked across the shortlist instead of using the curve
+    uptrend_only: bool = False  # counts only while SMA50 is not falling (gate on #4)
 
 
 def pure(feature: Callable[[Candles], float | None]) -> Feature:
     """A feature that only looks at the candles: drop the engine argument the runner passes."""
     return lambda candles, _engine: feature(candles)
-
-
-def not_built(_candles: Candles, _engine: Indicators) -> None:
-    """Placeholder of #22-#24 until slice F: always unavailable."""
-    return None
 
 
 INDICATORS = [
@@ -82,15 +80,16 @@ INDICATORS = [
     Indicator(19, Theme.RISK, 4, 20, "close_vs_sma20", partial(features.close_vs_sma, window=20), ramp(0.18, 0.08)),
     Indicator(20, Theme.RISK, 3, 21, "return_volatility", features.return_volatility, rank="low"),
     Indicator(21, Theme.RISK, 3, 21, "no_distribution_day", pure(features.no_distribution_day)),
-    Indicator(22, Theme.REVERSAL, 5, 60, "rsi_divergence", not_built),
-    Indicator(23, Theme.REVERSAL, 5, 60, "candle_pattern", not_built),
-    Indicator(24, Theme.POSITION, 4, 70, "trendline_breakout", not_built),
+    Indicator(22, Theme.REVERSAL, 5, 60, "rsi_divergence", patterns.rsi_divergence, uptrend_only=True),
+    Indicator(23, Theme.REVERSAL, 5, 60, "candle_pattern", patterns.candle_pattern, uptrend_only=True),
+    Indicator(24, Theme.POSITION, 4, 70, "trendline_breakout", patterns.trendline_breakout),
 ]
 assert [indicator.id for indicator in INDICATORS] == list(range(1, 25))
 assert sum(indicator.max_points for indicator in INDICATORS) == 100
+SMA50_CHANGE = 4  # the raw value the uptrend gate reads
 
 
-def raw_values(candles: Candles, engine: Indicators) -> dict[int, float | None]:
+def raw_values(candles: Candles, engine: Indicators) -> dict[int, Raw]:
     """Raw value of every indicator; None = unavailable (too few rows, or the feature cannot be computed)."""
     return {
         indicator.id: indicator.feature(candles, engine) if len(candles) >= indicator.min_rows else None
@@ -98,7 +97,7 @@ def raw_values(candles: Candles, engine: Indicators) -> dict[int, float | None]:
     }
 
 
-def percentile_ranks(raw_by_symbol: dict[str, dict[int, float | None]]) -> dict[str, dict[int, float]]:
+def percentile_ranks(raw_by_symbol: dict[str, dict[int, Raw]]) -> dict[str, dict[int, float]]:
     """Second pass for the ranked indicators (#6, #7, #20): rank each symbol among the symbols that have a value."""
     ranks: dict[str, dict[int, float]] = {symbol: {} for symbol in raw_by_symbol}
     for indicator in INDICATORS:
@@ -110,37 +109,41 @@ def percentile_ranks(raw_by_symbol: dict[str, dict[int, float | None]]) -> dict[
     return ranks
 
 
-def score_indicators(raw: dict[int, float | None], ranks: dict[int, float]) -> list[IndicatorResult]:
+def _result(
+    indicator: Indicator,
+    status: IndicatorStatus,
+    points: float = 0,
+    raw: dict[str, float | int | str | None] | None = None,
+) -> IndicatorResult:
+    return IndicatorResult(
+        id=indicator.id,
+        theme=indicator.theme,
+        status=status,
+        points=points,
+        max_points=indicator.max_points,
+        raw=raw or {},
+    )
+
+
+def score_indicators(raw: dict[int, Raw], ranks: dict[int, float]) -> list[IndicatorResult]:
     """Points of every indicator of one symbol. `ranks` = that symbol's entry of `percentile_ranks`."""
+    sma50_change = raw[SMA50_CHANGE]
+    gate = uptrend_gate(sma50_change if isinstance(sma50_change, float) else None)
     results = []
     for indicator in INDICATORS:
         value = raw[indicator.id]
         if value is None:
-            results.append(
-                IndicatorResult(
-                    id=indicator.id,
-                    theme=indicator.theme,
-                    status=IndicatorStatus.UNAVAILABLE,
-                    points=0,
-                    max_points=indicator.max_points,
-                )
-            )
-            continue
-        details = {indicator.raw_name: value}
-        if indicator.rank is None:
-            share = indicator.curve(value)
+            results.append(_result(indicator, IndicatorStatus.UNAVAILABLE))
+        elif indicator.uptrend_only and gate is not None:
+            results.append(_result(indicator, gate, raw={"sma50_change": sma50_change}))
         else:
-            rank = ranks[indicator.id]
-            details["percentile"] = rank
-            share = rank if indicator.rank == "high" else 1 - rank
-        results.append(
-            IndicatorResult(
-                id=indicator.id,
-                theme=indicator.theme,
-                status=IndicatorStatus.SCORED,
-                points=indicator.max_points * share,
-                max_points=indicator.max_points,
-                raw=details,
-            )
-        )
+            number, details = (value.strength, value.details) if isinstance(value, Detection) else (value, {})
+            facts = {indicator.raw_name: number, **details}
+            if indicator.rank is None:
+                share = indicator.curve(number)
+            else:
+                rank = ranks[indicator.id]
+                facts["percentile"] = rank
+                share = rank if indicator.rank == "high" else 1 - rank
+            results.append(_result(indicator, IndicatorStatus.SCORED, indicator.max_points * share, facts))
     return results

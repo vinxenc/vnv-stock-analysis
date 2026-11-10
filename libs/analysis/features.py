@@ -7,13 +7,21 @@ as its second parameter and never imports a library; the others only look at the
 plan's minimum-rows column: "N + 1 rows" means N sessions before today, or N one-day changes.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from libs.analysis.indicators import Indicators
 from libs.db.models import Price
 
 UP_DOWN_CAP = 10.0  # up/down volume ratio when nothing was sold: well above the ramp's top, finite for the JSON
 CROSS_AGE_CAP = 6.0  # a MACD cross older than this scores nothing, so the age stops counting here
+
+
+@dataclass(frozen=True)
+class Detection:
+    """What a shape feature (#22-#24) found: its strength, 0..1, and the facts behind it for the output."""
+
+    strength: float
+    details: dict[str, float | int | str | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -42,7 +50,7 @@ def _last(values: list[float | None]) -> float | None:
     return values[-1]
 
 
-def _mean(values: list[float]) -> float:
+def mean(values: list[float]) -> float:
     return sum(values) / len(values)
 
 
@@ -114,7 +122,7 @@ def ppo_cross_age(candles: Candles, engine: Indicators) -> float:
 
 def up_day_volume_ratio(candles: Candles, window: int = 20) -> float | None:
     """#12: today's volume / average volume of the `window` sessions before today; 0 when today is not an up day."""
-    average = _mean(candles.volume[-1 - window : -1])
+    average = mean(candles.volume[-1 - window : -1])
     if average == 0:
         return None
     return candles.volume[-1] / average if _is_up(candles, len(candles) - 1) else 0.0
@@ -133,8 +141,8 @@ def up_down_volume_ratio(candles: Candles, window: int = 20) -> float | None:
 def turnover_ratio(candles: Candles, short: int = 5, long: int = 20) -> float | None:
     """#14: average close x volume of the last `short` sessions / of the last `long` sessions (today included)."""
     turnover = [close * volume for close, volume in zip(candles.close, candles.volume, strict=True)]
-    average = _mean(turnover[-long:])
-    return None if average == 0 else _mean(turnover[-short:]) / average
+    average = mean(turnover[-long:])
+    return None if average == 0 else mean(turnover[-short:]) / average
 
 
 def close_location(candles: Candles) -> float | None:
@@ -172,7 +180,7 @@ def return_volatility(candles: Candles, engine: Indicators, window: int = 20) ->
 
 def no_distribution_day(candles: Candles, lookback: int = 10, window: int = 20) -> float | None:
     """#21: 1.0, or 0.0 if a session of the last `lookback` fell >= 3% on volume >= 1.5x the `window` average."""
-    average = _mean(candles.volume[-window:])
+    average = mean(candles.volume[-window:])
     if average == 0:
         return None
     for index in range(len(candles) - lookback, len(candles)):

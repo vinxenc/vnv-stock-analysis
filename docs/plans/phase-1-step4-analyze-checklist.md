@@ -93,10 +93,11 @@ Each indicator = raw function + config row + test on a **small hand-computed ser
 
 ### F. Indicators #22–#24 (the heavy ones)
 
-- [ ] #23 candle patterns with **TA-Lib** (`CDLENGULFING`, `CDLHAMMER`, `CDLMORNINGSTAR`, `CDLPIERCING`), strength 1.0 / 1.0 / 1.0 / 0.8 / 0.7 as in the plan, volume factor, recency factor, skip `high == low`, 5-session ≤ −3% context. The plan's gap-free hand-written variants are dropped (Q1).
-- [ ] #22 RSI bullish divergence: pivots (3 before / 3 after on close), latest two pivot lows within 40 sessions and ≥ 5 apart, conditions and recency per the plan; raw value = dates and RSI of L1 and L2.
-- [ ] #24 descending trendline breakout: pivot highs, candidate lines on `ln(high)` over the 60 sessions ending t−3, validity check (no high above the line by > 0.5%), choose by touches / length / recency, breakout on t−2..t, recency, volume and touches factors; raw value = anchor pivots, `L(t)`, touches.
-- [ ] Plot the detected trendlines and divergences for about 20 real symbols once (throwaway script in the scratchpad, not committed) before trusting the weights.
+- [x] #23 candle patterns with **TA-Lib** through the engine interface (`Indicators.bullish_patterns`: `CDLENGULFING`, `CDLHAMMER`, `CDLMORNINGSTAR`, `CDLPIERCING`), strength 1.0 / 1.0 / 1.0 / 0.8 / 0.7 as in the plan, volume factor, recency factor, skip `high == low`, 5-session ≤ −3% context. The plan's gap-free hand-written variants are dropped (Q1).
+- [x] #22 RSI bullish divergence: pivots (3 before / 3 after on close), latest two pivot lows within 40 sessions and ≥ 5 apart, conditions and recency per the plan; raw value = dates and RSI of L1 and L2.
+- [x] #24 descending trendline breakout: pivot highs, candidate lines on `ln(high)` over the 60 sessions ending t−3, validity check (no high above the line by > 0.5%), choose by touches / length / recency, breakout on t−2..t, recency, volume and touches factors; raw value = anchor pivots, `L(t)`, touches.
+- [~] Plot the detected trendlines and divergences for about 20 real symbols once (throwaway script, not committed) before trusting the weights: **deferred to the tuning pass**.
+- Notes (decided while building): code in `libs/analysis/patterns.py` (a `Detection` = strength + facts); the uptrend gate is applied in `score_indicators` (`uptrend_only` rows read #4's raw value). Facts are given as *sessions ago* (the history carries no dates), e.g. `l1_sessions_ago`, `l2_rsi`, `touches`, `line_today`. The trendline's breakout volume is the breakout session's, not always today's. #22 pairs the latest pivot low with the latest one at least 5 sessions before it. Smoke on the 88 real files (TA-Lib engine): #22 fires on 8, #24 on 1, #23 on none (7 engulfing / 2 hammer / 1 morning star / 3 piercing flags in the last 3 sessions, none after a 3% fall: the market had been rising). The line plots for about 20 symbols are not done: to do with the tuning pass.
 
 ### G. Ranking, output, summary table
 

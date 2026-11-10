@@ -196,8 +196,8 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 libs/constants.py   VN_TZ, exit codes, MIN_COVERAGE
 libs/prices/   base.py (Price, PriceSource, PriceNotFoundError, helpers), dnse.py, vps.py, vndirect.py
 tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
-libs/analysis/   models.py (the `vn_stock_analyze` output contract: AnalysisReport, SymbolResult, IndicatorResult), gates.py (coverage gate, uptrend gate, flags), scoring.py (the 24-row scoring table, curves, percentile rank), features.py (raw features), indicators/ (`Indicators` interface in base.py, `TalibIndicators` in talib_engine.py: the only TA-Lib / numpy import; features get the engine injected)
-tests/libs/analysis/   test_models.py (example JSON in tests/data/analysis_example.json), test_gates.py, test_scoring.py, test_features.py, indicators/test_contract.py (cases every engine must pass)
+libs/analysis/   models.py (the `vn_stock_analyze` output contract: AnalysisReport, SymbolResult, IndicatorResult), gates.py (coverage gate, uptrend gate, flags), scoring.py (the 24-row scoring table, curves, percentile rank), features.py (raw features), patterns.py (#22 divergence, #23 candle patterns, #24 trendline), indicators/ (`Indicators` interface in base.py, `TalibIndicators` in talib_engine.py: the only TA-Lib / numpy import; features get the engine injected)
+tests/libs/analysis/   test_models.py (example JSON in tests/data/analysis_example.json), test_gates.py, test_scoring.py, test_features.py, test_patterns.py, fakes.py (a stub engine), indicators/test_contract.py (cases every engine must pass)
 libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_actions.py (GithubActionsLogger, workflow commands on stdout)
 tests/libs/logger/   test_logxide.py, test_github_actions.py
 tests/migrations/   test_migrations.py (downgrade, upgrade, alembic check)

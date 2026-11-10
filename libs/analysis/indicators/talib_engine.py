@@ -5,7 +5,7 @@ import math
 import numpy as np
 import talib
 
-from .base import Indicators, Series, Values
+from .base import Flags, Indicators, Series, Values
 
 
 def _clean(array: np.ndarray) -> Series:
@@ -37,3 +37,14 @@ class TalibIndicators(Indicators):
         if first < len(ppo):
             histogram[first:] = ppo[first:] - talib.EMA(ppo[first:], signal)
         return _clean(histogram)
+
+    def bullish_patterns(self, opens: Values, highs: Values, lows: Values, closes: Values) -> Flags:
+        """TA-Lib answers 100 / 80 for bullish, -100 / -80 for bearish, 0 for none: keep the positive ones."""
+        candles = (_array(opens), _array(highs), _array(lows), _array(closes))
+        functions = {
+            "engulfing": talib.CDLENGULFING,
+            "hammer": talib.CDLHAMMER,
+            "morning_star": talib.CDLMORNINGSTAR,
+            "piercing": talib.CDLPIERCING,
+        }
+        return {name: [bool(value > 0) for value in function(*candles)] for name, function in functions.items()}
