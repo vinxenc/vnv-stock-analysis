@@ -13,6 +13,7 @@ Status: **all review questions answered, ready to build** (2026-11-10). Expands 
 - Layout: many small modules under `libs/analysis/`; the script only calls them (easier to review).
 - Local run: on a trading day run the real sync (retrieval + store) after `alembic upgrade head`; otherwise copy the last stored session to today (README has both); production code gets no new switch, no `AS_OF`.
 - Percentile-rank indicators (#6, #7, #20) depend on the whole shortlist; accepted.
+- **Data from Postgres is taken as correct (2026-11-10).** No re-validation in `vn_stock_analyze`: no market calendar, no "no bar today" / "missing previous session" lists, no missing-session gate, no corporate-action detection (the history is kept adjusted and complete on the data side). Each history file is ascending and ends on the session analysed (the screen requires a bar today); `as_of` = the newest date. This supersedes the "Missing session" and "Corporate action" rows of the plan's Gates table and the `suspected_corporate_action` flag. What stays: too few rows → indicator `unavailable` → coverage gate (that is real variation, not bad data).
 - #22–#24 ship together with #1–#21 (slice F after E, same feature); the coverage gate stays on the full 100 points.
 
 ## Design rules (so each piece can change alone)
@@ -20,7 +21,7 @@ Status: **all review questions answered, ready to build** (2026-11-10). Expands 
 - **Three layers, three places**, so tuning one never touches the others:
   1. *raw features*: pure functions `(rows) -> raw values or None` (SMA gap, RSI, PPO histogram, …). Know nothing about points.
   2. *scoring config*: one table (id, theme, max points, lo/hi thresholds, direction, min rows). Changing a weight or a threshold edits one row.
-  3. *gates and flags*: coverage, uptrend, missing session, corporate action. Separate functions, not inside the indicators.
+  3. *gates and flags*: coverage, uptrend, flags. Separate functions, not inside the indicators.
 - The job only reads the `vn-stock-history` artifact (no DB, no network) and writes `out/vn_stock_analysis.json`. Phase 2 reads only that JSON.
 - NaN never leaves the TA-Lib boundary: convert to `None` ("unavailable") in one helper.
 - Pure functions on plain lists / small pydantic models; numpy arrays only inside the TA-Lib wrapper.
@@ -32,7 +33,7 @@ libs/analysis/models.py       output pydantic models (the stable contract)
 libs/analysis/talib_wrap.py   the only file that imports talib / numpy; NaN -> None
 libs/analysis/features.py     raw feature functions
 libs/analysis/scoring.py      config table, ramp(), percentile rank, assert sum == 100
-libs/analysis/gates.py        market calendar, corporate-action detection, coverage, uptrend gate
+libs/analysis/gates.py        coverage gate, uptrend gate, flags
 scripts/vn_stock_analyze.py   load -> features -> gates -> score -> rank -> JSON + summary table
 tests/libs/analysis/…, tests/scripts/test_vn_stock_analyze.py
 ```
@@ -57,29 +58,24 @@ tests/libs/analysis/…, tests/scripts/test_vn_stock_analyze.py
 
 ### B. Output contract (models first, so Phase 2 can be reviewed against it)
 
-- [x] `AnalysisReport`: `as_of`, `shortlist_size`, `universe_size` (e.g. 120 of 406), counts (`scored`, `insufficient_data`, `flagged`, `missing_previous_session`), `missing_previous_session` list, `sources` used, `symbols` list.
+- [x] `AnalysisReport`: `as_of`, `universe_size` (the shortlist is `len(symbols)`, e.g. 120 of 406), counts (`scored`, `insufficient_data`, `flagged`), `sources` used, `symbols` list.
 - [x] `SymbolResult`: `symbol`, `score` (None when the coverage gate fails), `coverage` (available points), `status` (`scored` / `insufficient data`), theme subtotals, `indicators`, `flags`, turnover (for the tie-break).
 - [x] `IndicatorResult`: `id`, `points`, `max`, `raw` (dict of the raw values named in "Output per symbol"), `status` (`scored` / `gate_closed` / `unavailable`).
-- [x] Flags enum: `ceiling_locked` (close within 0.5% of +7%), `new_listing`, `suspected_corporate_action`, `low_coverage`. Flags never change the score.
+- [x] Flags enum: `ceiling_locked`, `new_listing`, `low_coverage`. Flags never change the score.
 - [x] `extra="forbid"` and an example JSON checked into `tests/data/` so a contract change is a visible diff.
 
-### C. Loading and the market calendar
+### C. Loading
 
-- [ ] Read `out/vn_stock_history/*.json` with the existing `read_prices` (validates, drops duplicates); one `list[Price]` per symbol, ascending.
-- [ ] `today` = today (VN). A symbol without a row on `today` is dropped and counted (should not happen after the screen; log it).
-- [ ] Market calendar = the distinct dates across all history files. Needed by the missing-session gate.
-- [ ] Symbol without a row on the preceding market session → "missing previous session" list, counted, excluded from scoring.
-- [ ] Empty history folder → exit `NO_DATA` (4), like the other jobs.
+- [x] Read `out/vn_stock_history/*.json` with the existing `read_prices`; one `list[Price]` per symbol (`scripts/vn_stock_analyze.py: load_history`).
+- [x] `as_of` = the newest date in the history. Indicators work on **rows** (the preceding session is the previous row).
+- [x] Empty or missing history folder → exit `NO_DATA` (4), like the other jobs.
 
-### D. Gates (before any indicator, because they decide which windows are valid)
+### D. Gates (small: they only decide what counts, never repair data)
 
-- [ ] Corporate action: find one-day changes beyond the HOSE band ±7% (±20% for the first session after `listed_date` in `data/hose_symbols.csv`), only between *adjacent market sessions*. Record the index of the latest jump per symbol.
-- [ ] Verify the band value (the plan says "to be verified"): ±7% HOSE, ±20% new listing, and the open question about a first session after a long suspension.
-- [ ] Missing session: any fixed-window indicator whose window contains a market session missing for that symbol is `unavailable`; EMA / Wilder ones continue across the gap.
-- [ ] A fixed window containing a jump → `unavailable`; EMA / Wilder ones (#8–#11, #22) restart on the rows after the jump and are available again once rows-since-jump reach their min rows. #23 unavailable if its 3 candles or 5-session context contain the jump; #24 if its 60-session window does.
 - [ ] Coverage gate: score only when available points ≥ 80, else `insufficient data` with no number.
 - [ ] Uptrend gate for #22, #23: closed (0 points, `gate_closed`) when the raw value of #4 < 0; `unavailable` when #4 itself is unavailable.
-- [ ] Tests: holiday gap (not a missing session), a real missing session, a fake +14.5% from two ceiling days around a gap, ex-rights drop in the last 5 / 20 / 100 sessions, new-listing ±20%.
+- [ ] Flags (shown, never change the score): `ceiling_locked` (close within 0.5% of +7%), `new_listing` (first session on or after `listed_date` in `data/hose_symbols.csv`), `low_coverage`.
+- [ ] Tests: coverage edge (exactly 80), gate closed vs unavailable, each flag.
 
 ### E. Indicators (#1–#21), in groups so each group is a reviewable commit
 
@@ -106,7 +102,7 @@ Each indicator = raw function + config row + test on a **small hand-computed ser
 - [ ] Sort by score (desc), ties by turnover (desc); `insufficient data` symbols after the scored ones.
 - [ ] Write `out/vn_stock_analysis.json` from the pydantic model (the directory is emptied / the file removed first, like the other scripts, so an old file never passes for today's).
 - [ ] Markdown table to `$GITHUB_STEP_SUMMARY`: rank, symbol, score, coverage, five theme subtotals, flags; a header line with `as_of`, shortlist size, counts. Local runs print the same table to stdout instead.
-- [ ] Logging through `Logger` (never `print`); log counts of scored / insufficient / flagged / missing-previous-session.
+- [ ] Logging through `Logger` (never `print`); log counts of scored / insufficient / flagged.
 - [ ] Exit codes: 0 ok, 4 no data, anything else = crash (same convention).
 
 ### H. Workflow job
@@ -119,7 +115,7 @@ Each indicator = raw function + config row + test on a **small hand-computed ser
 
 ### I. Tests and "done when"
 
-- [ ] One test per indicator, per gate, and the cases of step 4: holiday gap, missing session, halted symbol (volume 0 / high = low), too little history, fake drop, every gate.
+- [ ] One test per indicator, per gate, and the cases that remain: halted symbol (volume 0 / high = low), too little history, every gate.
 - [ ] Contract test: the JSON validates against the model and equals the example file's shape.
 - [ ] End-to-end test on `tests/data/prices_hpg_aam.json` (real HPG and AAM): AAM is almost untraded, HPG is very liquid.
 - [ ] Manual run: local Postgres seeded → today's copied row → screen → history → analyze → eyeball the top 10 against a chart of 3 symbols.

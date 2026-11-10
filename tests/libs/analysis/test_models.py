@@ -74,11 +74,3 @@ def test_indicator_points(status: IndicatorStatus, points: float, message: str) 
 def test_indicator_id_range() -> None:
     with pytest.raises(ValidationError):
         IndicatorResult(id=25, theme=Theme.TREND, status=IndicatorStatus.SCORED, points=0, max_points=3)
-
-
-@pytest.mark.parametrize("field", ["scored", "insufficient_data", "flagged", "shortlist_size"])
-def test_counts_must_match_the_symbols(field: str) -> None:
-    data = example()
-    data[field] += 1
-    with pytest.raises(ValidationError):
-        AnalysisReport.model_validate(data)

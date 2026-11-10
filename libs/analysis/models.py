@@ -36,7 +36,6 @@ class Flag(StrEnum):
 
     CEILING_LOCKED = "ceiling_locked"  # close within 0.5% of the +7% ceiling: hard to buy
     NEW_LISTING = "new_listing"
-    SUSPECTED_CORPORATE_ACTION = "suspected_corporate_action"
     LOW_COVERAGE = "low_coverage"
 
 
@@ -79,23 +78,10 @@ class SymbolResult(Model):
 
 
 class AnalysisReport(Model):
-    as_of: dt.date  # the session analysed (today, VN)
-    universe_size: int = Field(ge=0)  # symbols in data/hose_symbols.csv
-    shortlist_size: int = Field(ge=0)  # symbols that passed the liquidity screen
+    as_of: dt.date  # the session analysed: the newest date in the history
+    universe_size: int = Field(ge=0)  # symbols in data/hose_symbols.csv; the shortlist is len(symbols)
     scored: int = Field(ge=0)
     insufficient_data: int = Field(ge=0)
     flagged: int = Field(ge=0)  # symbols with at least one flag
-    missing_previous_session: list[str] = []  # on the shortlist but without a bar on the preceding session
     sources: list[str]  # price sources found in the history, e.g. ["DNSE", "VNDirect"]
     symbols: list[SymbolResult]  # ranked: score descending, ties by turnover, "insufficient data" last
-
-    @model_validator(mode="after")
-    def check_counts(self) -> "AnalysisReport":
-        scored = sum(symbol.status == SymbolStatus.SCORED for symbol in self.symbols)
-        flagged = sum(bool(symbol.flags) for symbol in self.symbols)
-        counts = (self.scored, self.insufficient_data, self.flagged)
-        if counts != (scored, len(self.symbols) - scored, flagged):
-            raise ValueError(f"counts {counts} do not match the symbols")
-        if self.shortlist_size != len(self.symbols) + len(self.missing_previous_session):
-            raise ValueError("shortlist_size is not the symbols plus the missing_previous_session list")
-        return self

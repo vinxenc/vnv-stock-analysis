@@ -205,6 +205,8 @@ Speed does not matter at this size (all are far below one second against a 20-mi
 
 ### Gates and exclusions
 
+**Superseded (2026-11-10):** the Missing session and Corporate action rows below are dropped; `vn_stock_analyze` takes the stored history as correct, see [phase-1-step4-analyze-checklist.md](phase-1-step4-analyze-checklist.md). Phase 2's `suspected corporate action` flag goes with them.
+
 | Gate | Rule |
 |---|---|
 | Liquidity | Step 2 already dropped symbols below 20 billion VND turnover. |

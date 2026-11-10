@@ -201,9 +201,9 @@ tests/libs/analysis/   test_models.py (example JSON in tests/data/analysis_examp
 libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_actions.py (GithubActionsLogger, workflow commands on stdout)
 tests/libs/logger/   test_logxide.py, test_github_actions.py
 tests/migrations/   test_migrations.py (downgrade, upgrade, alembic check)
-scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, vn_stock_screen.py, pipeline_state.py, notification.py
+scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, vn_stock_screen.py, vn_stock_get_history.py, vn_stock_analyze.py, pipeline_state.py, notification.py, vn_stock_analyze.py
 tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`), data/prices_hpg_aam.json (real DNSE history of HPG and AAM, 2026-09-15..2026-10-29, test data of the screen)
-tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_vn_stock_screen.py, test_pipeline_state.py, test_notification.py
+tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_vn_stock_screen.py, test_vn_stock_get_history.py, test_vn_stock_analyze.py, test_pipeline_state.py, test_notification.py
 ```
 
 Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, and a negative volume.
