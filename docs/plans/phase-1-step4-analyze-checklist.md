@@ -30,7 +30,7 @@ Layout (decided):
 
 ```
 libs/analysis/models.py       output pydantic models (the stable contract)
-libs/analysis/talib_wrap.py   the only file that imports talib / numpy; NaN -> None
+libs/analysis/indicators/     Indicators interface (base.py) + TalibIndicators (talib_engine.py), the only talib / numpy import; features get the engine injected, a new library = a new subclass
 libs/analysis/features.py     raw feature functions
 libs/analysis/scoring.py      config table, ramp(), percentile rank, assert sum == 100
 libs/analysis/gates.py        coverage gate, uptrend gate, flags
@@ -81,14 +81,15 @@ tests/libs/analysis/…, tests/scripts/test_vn_stock_analyze.py
 
 Each indicator = raw function + config row + test on a **small hand-computed series** (TA-Lib golden values would be circular).
 
-- [ ] Scoring core: `ramp(x, lo, hi, direction)`, yes/no, percentile rank, config table, `assert sum(max) == 100`, available-points calculation.
-- [ ] Trend #1–#5: `talib.SMA`; #3 yes/no; #4 SMA50 vs 10 sessions ago.
-- [ ] Momentum #6–#7 (percentile rank across the shortlist: needs a second pass after all raws exist), #8 `talib.RSI(14)` with the trapezoid ramp, #9–#11 PPO recipe: `talib.PPO(close, 12, 26, matype=1) / 100`, histogram = ppo − `talib.EMA(ppo, 9)` on the non-NaN part (**not** `talib.MACD`), #11 cross recency.
-- [ ] Money flow #12–#15: up-day-only volume ratio, up/down-volume ratio (full points when no down-volume), 5/20 turnover ratio, close location (unavailable when high = low).
-- [ ] Position #16–#18: prior 20-session high (excluding today), 250-session high, higher lows.
-- [ ] Risk #19–#21: overextension, `talib.STDDEV` of daily returns + percentile rank (#20), distribution-day yes/no.
-- [ ] Re-measure the warm-up min rows (#8 45, #9 70, #10 55, #11 70) against the seed's real history once the code exists; edit the config rows if they differ.
-- [ ] Check the seed for symbols with too little history (new listings) → `insufficient data` path exercised on real data.
+- [x] Scoring core: `ramp(x, lo, hi, direction)`, yes/no, percentile rank, config table, `assert sum(max) == 100`, available-points calculation.
+- [x] Trend #1–#5: `talib.SMA`; #3 yes/no; #4 SMA50 vs 10 sessions ago.
+- [x] Momentum #6–#7 (percentile rank across the shortlist: needs a second pass after all raws exist), #8 `talib.RSI(14)` with the trapezoid ramp, #9–#11 PPO recipe: `talib.PPO(close, 12, 26, matype=1) / 100`, histogram = ppo − `talib.EMA(ppo, 9)` on the non-NaN part (**not** `talib.MACD`), #11 cross recency.
+- [x] Money flow #12–#15: up-day-only volume ratio, up/down-volume ratio (full points when no down-volume), 5/20 turnover ratio, close location (unavailable when high = low).
+- [x] Position #16–#18: prior 20-session high (excluding today), 250-session high, higher lows.
+- [x] Risk #19–#21: overextension, `talib.STDDEV` of daily returns + percentile rank (#20), distribution-day yes/no.
+- [~] Re-measure the warm-up min rows (#8 45, #9 70, #10 55, #11 70) against the seed's real history: **deferred to the tuning pass** (with the weights and thresholds); the plan's values are in the table.
+- [x] Check the seed for symbols with too little history (new listings) → `insufficient data` path exercised on real data.
+- Notes (decided while building): all 24 rows are in `libs/analysis/scoring.py` from now, #22–#24 are `not_built` stubs (unavailable) until slice F, so with only #1–#21 the most a symbol can have available is 86 points: before F nobody below about 200 rows passes the 80-point gate, by design. Availability is decided by `min_rows`, not by NaN (TA-Lib returns RSI / EMA values long before the warm-up the table asks for). Percentile rank: ties share the middle, one symbol alone = 0.5. Smoke run on the 88 real history files: no exception, no non-finite value, LPS (58 rows) 63 points available, GEL (187) 78, VCK (223) 84, the rest 86.
 
 ### F. Indicators #22–#24 (the heavy ones)
 

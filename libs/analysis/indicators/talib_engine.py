@@ -1,0 +1,39 @@
+"""TA-Lib implementation of `Indicators`. The only module that imports TA-Lib and numpy."""
+
+import math
+
+import numpy as np
+import talib
+
+from .base import Indicators, Series, Values
+
+
+def _clean(array: np.ndarray) -> Series:
+    return [None if math.isnan(value) else float(value) for value in array]
+
+
+def _array(values: Values) -> np.ndarray:
+    return np.asarray(values, dtype=np.float64)  # TA-Lib rejects ints (volume) and lists
+
+
+class TalibIndicators(Indicators):
+    def sma(self, values: Values, window: int) -> Series:
+        return _clean(talib.SMA(_array(values), window))
+
+    def ema(self, values: Values, window: int) -> Series:
+        return _clean(talib.EMA(_array(values), window))
+
+    def rsi(self, values: Values, window: int = 14) -> Series:
+        return _clean(talib.RSI(_array(values), window))
+
+    def stddev(self, values: Values, window: int) -> Series:
+        return _clean(talib.STDDEV(_array(values), window))
+
+    def ppo_histogram(self, values: Values, fast: int = 12, slow: int = 26, signal: int = 9) -> Series:
+        """Not `talib.MACD`: that one is absolute and seeds its fast EMA differently."""
+        ppo = _array(talib.PPO(_array(values), fast, slow, matype=1)) / 100
+        first = next((index for index, value in enumerate(ppo) if not math.isnan(value)), len(ppo))
+        histogram = np.full(len(ppo), np.nan)
+        if first < len(ppo):
+            histogram[first:] = ppo[first:] - talib.EMA(ppo[first:], signal)
+        return _clean(histogram)
