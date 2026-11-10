@@ -72,10 +72,10 @@ tests/libs/analysis/…, tests/scripts/test_vn_stock_analyze.py
 
 ### D. Gates (small: they only decide what counts, never repair data)
 
-- [ ] Coverage gate: score only when available points ≥ 80, else `insufficient data` with no number.
-- [ ] Uptrend gate for #22, #23: closed (0 points, `gate_closed`) when the raw value of #4 < 0; `unavailable` when #4 itself is unavailable.
-- [ ] Flags (shown, never change the score): `ceiling_locked` (close within 0.5% of +7%), `new_listing` (first session on or after `listed_date` in `data/hose_symbols.csv`), `low_coverage`.
-- [ ] Tests: coverage edge (exactly 80), gate closed vs unavailable, each flag.
+- [x] Coverage gate: score only when available points ≥ 80, else `insufficient data` with no number.
+- [x] Uptrend gate for #22, #23: closed (0 points, `gate_closed`) when the raw value of #4 < 0; `unavailable` when #4 itself is unavailable.
+- [x] Flags (shown, never change the score): `ceiling_locked` (close within 0.5% of +7%), `new_listing` (`listed_date` in `data/hose_symbols.csv` less than 90 calendar days before `as_of`, about 60 sessions), `low_coverage` (available points < 90). Constants named in `libs/analysis/gates.py`.
+- [x] Tests: coverage edge (exactly 80), gate closed vs unavailable, each flag.
 
 ### E. Indicators (#1–#21), in groups so each group is a reviewable commit
 

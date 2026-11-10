@@ -196,8 +196,8 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 libs/constants.py   VN_TZ, exit codes, MIN_COVERAGE
 libs/prices/   base.py (Price, PriceSource, PriceNotFoundError, helpers), dnse.py, vps.py, vndirect.py
 tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
-libs/analysis/   models.py (the `vn_stock_analyze` output contract: AnalysisReport, SymbolResult, IndicatorResult)
-tests/libs/analysis/   test_models.py (example JSON in tests/data/analysis_example.json)
+libs/analysis/   models.py (the `vn_stock_analyze` output contract: AnalysisReport, SymbolResult, IndicatorResult), gates.py (coverage gate, uptrend gate, flags)
+tests/libs/analysis/   test_models.py (example JSON in tests/data/analysis_example.json), test_gates.py
 libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_actions.py (GithubActionsLogger, workflow commands on stdout)
 tests/libs/logger/   test_logxide.py, test_github_actions.py
 tests/migrations/   test_migrations.py (downgrade, upgrade, alembic check)
