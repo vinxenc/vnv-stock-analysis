@@ -1,0 +1,75 @@
+{
+  "as_of": "2026-11-10",
+  "universe_size": 406,
+  "sources": [
+    "DNSE",
+    "VNDirect"
+  ],
+  "symbols": [
+    {
+      "symbol": "HPG",
+      "score": 71.5,
+      "coverage": 98.0,
+      "turnover": 1250000000.0,
+      "themes": {
+        "trend": 20.0,
+        "momentum": 15.5,
+        "money_flow": 18.0,
+        "position": 8.0,
+        "risk": 7.0,
+        "reversal": 3.0
+      },
+      "indicators": [
+        {
+          "id": 1,
+          "theme": "trend",
+          "status": "scored",
+          "points": 2.1,
+          "max_points": 3.0,
+          "raw": {
+            "close_vs_sma20": 0.021
+          }
+        },
+        {
+          "id": 22,
+          "theme": "reversal",
+          "status": "gate_closed",
+          "points": 0.0,
+          "max_points": 5.0,
+          "raw": {
+            "sma50_change": -0.004
+          }
+        },
+        {
+          "id": 17,
+          "theme": "position",
+          "status": "unavailable",
+          "points": 0.0,
+          "max_points": 2.0,
+          "raw": {}
+        }
+      ],
+      "flags": [
+        "ceiling_locked"
+      ]
+    },
+    {
+      "symbol": "LPS",
+      "score": null,
+      "coverage": 62.0,
+      "turnover": 21000000.0,
+      "themes": {
+        "trend": 5.0,
+        "momentum": 0.0,
+        "money_flow": 0.0,
+        "position": 0.0,
+        "risk": 0.0,
+        "reversal": 0.0
+      },
+      "indicators": [],
+      "flags": [
+        "low_coverage"
+      ]
+    }
+  ]
+}

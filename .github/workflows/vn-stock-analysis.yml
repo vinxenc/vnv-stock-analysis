@@ -131,8 +131,39 @@ jobs:
           success-message: Read the price history of the shortlist
           failure-message: Pipeline failed, can not read the price history
 
+  vn_stock_analyze:
+    name: vn stock analyze
+    needs: vn_stock_get_history
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # a few seconds of computing; no database, no network
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-env
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: vn-stock-history
+          path: out/vn_stock_history
+      - name: Score the shortlist
+        # exits 0 after writing the JSON and the ranked table to the job summary, 4 when there is no history
+        run: uv run --no-sync python -m scripts.vn_stock_analyze
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: vn-stock-analysis
+          path: out/vn_stock_analysis.json
+          retention-days: 7
+          if-no-files-found: error
+      - if: always()
+        uses: ./.github/actions/pipeline-state
+        with:
+          pipeline: vn_stock_analyze
+          job-status: ${{ job.status }}
+          success-message: Scored the shortlist, ranking in the job summary
+          failure-message: Pipeline failed, can not score the shortlist
+
   notification:
-    needs: [start-analyze, install, is_holiday, vn_stock_screen, vn_stock_get_history]  # each job added to this workflow goes here too
+    needs: [start-analyze, install, is_holiday, vn_stock_screen, vn_stock_get_history, vn_stock_analyze]  # each job added to this workflow goes here too
     if: always()  # also after a failed or skipped job: it only reads the state files they wrote
     runs-on: ubuntu-latest
     steps:

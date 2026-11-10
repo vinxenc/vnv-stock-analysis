@@ -13,6 +13,7 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `scripts/vn_stock_daily_price_store.py` | Reads the JSON above and upserts it into the `prices` table (`ON CONFLICT (symbol, date) DO UPDATE`, one transaction). Needs `$DATABASE_URL`. Exit 4 if the file holds no price. A repeated (symbol, date) in the file: the last row wins. 10 s connect and 60 s statement timeouts. |
 | `scripts/vn_stock_screen.py` | Reads `prices` and writes `out/liquid_symbols.csv` (a `code` column): the symbols that traded today (Vietnam time) and whose average turnover (`close × volume`) over their last 20 sessions is at least 20 billion VND (a symbol with fewer rows is averaged over the rows it has). Needs `$DATABASE_URL`. Crashes (exit 1) when the newest session in `prices` is not today, so a late or failed sync is never reported as fresh data; Also crashes when fewer than 90% of the previous session's symbols have a bar today (a partial sync would silently shrink the shortlist). Exit 4 if nobody is liquid enough. |
 | `scripts/vn_stock_get_history.py` | For each symbol in `out/liquid_symbols.csv`, one query reads its last 260 sessions (`SESSIONS`) from `prices` and writes `out/vn_stock_history/<SYMBOL>.json` (a JSON array of `Price` rows, ascending date). The folder is emptied first and is the input of the next job. Needs `$DATABASE_URL`, only reads. A symbol with fewer rows is logged, never fatal; a symbol with no row gets no file. Exit 4 if no symbol has a row. |
+| `scripts/vn_stock_analyze.py` | Reads `out/vn_stock_history/*.json` (the previous job's artifact) and `data/hose_symbols.csv`, scores each symbol with the 24 indicators of `libs/analysis` (see `docs/plans/phase-1-sql-screens.md`, "Scoring design"), and writes `out/vn_stock_analysis.json` (the contract in `libs/analysis/models.py`, input of Phase 2) plus a ranked markdown table to `$GITHUB_STEP_SUMMARY` (the log when it is unset). No database, no network. Exit 4 when there is no history. |
 | `libs/constants.py` | Shared by the libs and scripts: `VN_TZ`, the exit code `NO_DATA` (4), `MIN_COVERAGE` (0.9). |
 | `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. `0001` creates `prices`, `0002` adds the index on `prices.date` (`max(date)` cannot use the primary key). A migration that already ran is never edited, not even reformatted (`ruff format` skips `0001`). |
 | `docker-compose.yml` | Local Postgres 17 (user, password and database all `vnv`). |
@@ -23,7 +24,7 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `scripts/pipeline_state.py`, `scripts/notification.py`, `.github/actions/pipeline-state/` | Pipeline state files and the notification that reads them (see below). |
 | `.github/actions/setup-env/`, `.github/actions/check-holiday/` | Composite actions shared by all workflows: install uv with the cache settings and run `uv sync --locked` (see the uv cache rule below); run `scripts/vn_holiday.py` and output `holiday`. |
 | `.github/workflows/vn-stock-prices-sync.yml` | `VN Stock Prices Sync`: weekday cron (14:45 Vietnam time; not on the hour, scheduled runs on the hour are delayed most). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
-| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (15:45 Vietnam time) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync` one hour earlier), never fetches. Jobs so far: `start-analyze` → `install` → `is_holiday` (a day off skips the later jobs) → `vn_stock_screen` (uploads the `vn-stock-screen` artifact, with the `production` environment's `DATABASE_URL` secret) → `vn_stock_get_history` (downloads that artifact, uploads `vn-stock-history`, same secret), then `notification`. The analyze job is planned in `docs/plans/phase-1-sql-screens.md`. |
+| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (15:45 Vietnam time) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync` one hour earlier), never fetches. Jobs so far: `start-analyze` → `install` → `is_holiday` (a day off skips the later jobs) → `vn_stock_screen` (uploads the `vn-stock-screen` artifact, with the `production` environment's `DATABASE_URL` secret) → `vn_stock_get_history` (downloads that artifact, uploads `vn-stock-history`, same secret) → `vn_stock_analyze` (downloads the history, no secret, uploads `vn-stock-analysis` and writes the ranked table to the job summary), then `notification`. Design: `docs/plans/phase-1-sql-screens.md`. |
 
 The endpoints are undocumented and may change or block without notice.
 
@@ -136,6 +137,37 @@ uv run alembic upgrade head
 
 The unit tests do not use the seed: `tests/data/prices_hpg_aam.json` holds real history of two stocks (HPG, very liquid; AAM, almost untraded), and the `before_test` fixture of `test_screen` stores it in the empty test database before the screen runs.
 
+#### Run the analysis pipeline locally
+
+`vn_stock_screen` fails unless the newest session in `prices` is today (VN), and the seed stops at its build date. So on a trading day, run the real sync first (it fetches today's bar of every symbol, about 20 min) and then the analysis jobs:
+
+```bash
+docker compose up -d --wait
+export DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv
+uv run alembic upgrade head                                  # schema + seed
+uv run python -m scripts.vn_stock_latest_price_retrieval     # fetch today's bars
+uv run python -m scripts.vn_stock_daily_price_store          # upsert them into prices
+uv run python -m scripts.vn_stock_screen && uv run python -m scripts.vn_stock_get_history
+```
+
+Without a real bar for today (weekend, holiday, before the close, or no time for the sync), copy the newest session to today instead (no code switch, production is unchanged):
+
+```bash
+docker compose exec -T postgres psql -U vnv -d vnv -c "INSERT INTO prices (symbol, date, source, unit, open, high, low, close, volume) SELECT symbol, CURRENT_DATE, source, unit, open, high, low, close, volume FROM prices WHERE date = (SELECT max(date) FROM prices) ON CONFLICT (symbol, date) DO NOTHING"
+```
+
+A copied bar means a 0% change and the same volume as the last session: fine for a smoke run, useless for judging scores. On a weekend `CURRENT_DATE` is not a session, so put the date by hand. The real sync overwrites the copy (same `(symbol, date)`); to remove it, `DELETE FROM prices WHERE date = CURRENT_DATE`.
+
+**One Postgres at a time.** Every worktree has its own compose project (named after the folder) but they all publish `127.0.0.1:5432`, so only one can run. When you start working in a new worktree, stop the others first, then recreate this one (an old container created while the port was taken has no port mapping, so `--force-recreate`) and re-seed:
+
+```bash
+docker ps -q --filter publish=5432 | xargs -r docker stop
+docker compose up -d --force-recreate --wait
+DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv uv run alembic upgrade head
+```
+
+`TA-Lib` (indicators) is a runtime dependency, so the `install` job's `uv sync --locked` fetches its wheel (the C library is bundled; no system package needed) and numpy.
+
 ### CI
 
 `.github/workflows/ci.yml` runs on every pull request to `master`. The jobs run in order, and each one needs the previous one to pass.
@@ -165,12 +197,16 @@ Later jobs restore the cache from `install`, so their own `uv sync --locked` onl
 libs/constants.py   VN_TZ, exit codes, MIN_COVERAGE
 libs/prices/   base.py (Price, PriceSource, PriceNotFoundError, helpers), dnse.py, vps.py, vndirect.py
 tests/libs/prices/   test_base.py, test_dnse.py, test_vps.py, test_vndirect.py, test_live.py
+libs/indicators/   base.py (`Indicators` interface), talib_engine.py (`TalibIndicators`: the only TA-Lib / numpy import; the analysis gets an engine injected, a new library = a new subclass)
+libs/analysis/   models.py (the `vn_stock_analyze` output contract: AnalysisReport, SymbolResult, IndicatorResult), gates.py (coverage gate, uptrend gate, flags), scoring.py (the 24-row scoring table, curves, percentile rank), report.py (build and rank the report), summary.py (markdown table), features.py (raw features), patterns.py (#22 divergence, #23 candle patterns, #24 trendline)
+tests/libs/indicators/   test_contract.py (cases every engine must pass)
+tests/libs/analysis/   test_models.py (example JSON in tests/data/analysis_example.json), test_gates.py, test_scoring.py, test_features.py, test_patterns.py, test_report.py, test_summary.py, fakes.py (a stub engine)
 libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_actions.py (GithubActionsLogger, workflow commands on stdout)
 tests/libs/logger/   test_logxide.py, test_github_actions.py
 tests/migrations/   test_migrations.py (downgrade, upgrade, alembic check)
-scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, vn_stock_screen.py, pipeline_state.py, notification.py
+scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, vn_stock_screen.py, vn_stock_get_history.py, vn_stock_analyze.py, pipeline_state.py, notification.py
 tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`), data/prices_hpg_aam.json (real DNSE history of HPG and AAM, 2026-09-15..2026-10-29, test data of the screen)
-tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_vn_stock_screen.py, test_pipeline_state.py, test_notification.py
+tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_vn_stock_screen.py, test_vn_stock_get_history.py, test_vn_stock_analyze.py, test_pipeline_state.py, test_notification.py
 ```
 
 Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, and a negative volume.
