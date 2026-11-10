@@ -6,6 +6,7 @@ dependencies = [
     "holidays>=0.107",
     "logxide>=0.3.0",
     "niquests>=3.21.2",
+    "numpy>=2.5.4",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2",
     "sqlmodel>=0.0.48",

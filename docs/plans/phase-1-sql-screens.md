@@ -158,6 +158,8 @@ About three quarters of the points come from price (trend, momentum, position, r
 - Raw value in the output: the date and RSI of L1 and L2.
 - Option not in the table: the *hidden* bullish divergence (higher low in price, lower low in RSI) fits an uptrend better; the regular divergence mostly signals leaving a downtrend and will rarely fire under the uptrend gate. Count how often each fires once history exists.
 
+**Superseded (2026-11-10):** the implementation uses TA-Lib's own definitions of these four patterns (`Indicators.bullish_patterns`), not the gap-free ones below. TA-Lib's morning star and piercing line need a gap, so they will rarely fire on HOSE; the gap handling is fixed later in another pipeline. The weights, context, volume and recency rules below still apply.
+
 **#23 Bullish reversal candle pattern.** Four patterns, defined on the candle bodies and **without gap rules** (HOSE opens through the ATO auction, so textbook gaps almost never occur):
 - *Bullish engulfing:* previous candle bearish, this one bullish with `open ≤ previous close` and `close ≥ previous open`.
 - *Morning star (3 candles):* a long bearish body, then a small body (≤ 30% of the first body), then a bullish candle closing above the midpoint of the first body.
