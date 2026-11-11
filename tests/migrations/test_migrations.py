@@ -5,8 +5,9 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
+from libs.analysis.models import Timeframe
 from libs.db import connect
 from libs.db.models import Price
 
@@ -25,6 +26,9 @@ def test_migrations_roundtrip_and_match_the_models(alembic_config: Config) -> No
         "vn_stock_rankings",
     }
     assert {index["name"] for index in inspect(engine).get_indexes("prices")} == {"ix_prices_date"}
+    # `alembic check` does not compare enum values: a new Timeframe member needs its own `ALTER TYPE` migration
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT enum_range(NULL::timeframe)::text[]")).scalar() == list(Timeframe)
     engine.dispose()
 
 

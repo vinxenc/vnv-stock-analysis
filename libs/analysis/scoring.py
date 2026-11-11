@@ -47,6 +47,17 @@ class Indicator:
     uptrend_only: bool = False  # counts only while SMA50 is not falling (gate on #4)
 
 
+def metadata() -> dict:
+    """The weights behind a score, stored with every ranking row: they are placeholders to tune, so a stored score must
+    say which weights produced it. The curves' thresholds are closures and are not included."""
+    return {
+        "weights": [
+            {"id": i.id, "theme": i.theme, "name": i.raw_name, "max_points": i.max_points, "min_rows": i.min_rows}
+            for i in INDICATORS
+        ]
+    }
+
+
 def pure(feature: Callable[[Candles], float | None]) -> Feature:
     """A feature that only looks at the candles: drop the engine argument the runner passes."""
     return lambda candles, _engine: feature(candles)

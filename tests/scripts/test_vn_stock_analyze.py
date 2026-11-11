@@ -7,9 +7,18 @@ import pytest
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from libs.analysis.models import AnalysisReport, Flag, IndicatorResult, IndicatorStatus, SymbolResult, Theme
+from libs.analysis import scoring
+from libs.analysis.models import (
+    AnalysisReport,
+    Flag,
+    IndicatorResult,
+    IndicatorStatus,
+    SymbolResult,
+    Theme,
+    Timeframe,
+)
 from libs.constants import NO_DATA
-from libs.db.models import Ranking, Timeframe
+from libs.db.models import Ranking
 from scripts.vn_stock_analyze import load_history, main, read_listed_dates, store
 from tests.libs.analysis.fakes import make_rows
 
@@ -17,6 +26,7 @@ DAY = dt.date(2026, 11, 10)
 
 
 def result(code: str, score: float | None, flags: list[Flag] | None = None) -> SymbolResult:
+    """A scored symbol with one indicator, enough to check what is stored."""
     indicator = IndicatorResult(
         id=1, theme=Theme.TREND, status=IndicatorStatus.SCORED, points=2.5, max_points=3, raw={"close_vs_sma20": 0.02}
     )
@@ -26,41 +36,44 @@ def result(code: str, score: float | None, flags: list[Flag] | None = None) -> S
     )
 
 
-def report(*symbols: SymbolResult) -> AnalysisReport:
-    return AnalysisReport(as_of=DAY, universe_size=406, sources=["DNSE"], symbols=list(symbols))
+def report(*symbols: SymbolResult, timeframe: Timeframe = Timeframe.DAILY) -> AnalysisReport:
+    """A report of DAY with these symbols, in this order."""
+    return AnalysisReport(as_of=DAY, timeframe=timeframe, universe_size=406, sources=["DNSE"], symbols=list(symbols))
 
 
 def rankings(engine: Engine) -> list[Ranking]:
+    """Every stored row, by date, timeframe and symbol."""
     with Session(engine) as session:
-        return list(
-            session.exec(select(Ranking).order_by(Ranking.date, Ranking.timeframe, Ranking.rank, Ranking.symbol))
-        )
+        return list(session.exec(select(Ranking).order_by(Ranking.date, Ranking.timeframe, Ranking.symbol)))
 
 
-def test_store_writes_one_row_per_symbol_in_rank_order(engine: Engine) -> None:
-    """The unscored symbol last with a null score; the JSONB columns round-trip."""
+def test_store_writes_one_row_per_symbol_with_the_weights(engine: Engine) -> None:
+    """A null score for insufficient data; the JSONB columns round-trip; every row carries the scoring weights."""
     store(report(result("HPG", 71.5, [Flag.CEILING_LOCKED]), result("AAM", None)), engine)
     rows = rankings(engine)
-    assert [(row.date, row.timeframe, row.rank, row.symbol, row.score) for row in rows] == [
-        (DAY, Timeframe.DAILY, 1, "HPG", 71.5),
-        (DAY, Timeframe.DAILY, 2, "AAM", None),
+    assert [(row.date, row.timeframe, row.symbol, row.score) for row in rows] == [
+        (DAY, Timeframe.DAILY, "AAM", None),
+        (DAY, Timeframe.DAILY, "HPG", 71.5),
     ]
-    assert rows[0].flags == ["ceiling_locked"]
-    assert rows[0].themes["trend"] == 2.5
-    assert rows[0].indicators[0]["raw"] == {"close_vs_sma20": 0.02}
+    hpg = rows[1]
+    assert hpg.flags == ["ceiling_locked"]
+    assert hpg.themes["trend"] == 2.5
+    assert hpg.indicators[0]["raw"] == {"close_vs_sma20": 0.02}
+    assert hpg.meta == scoring.metadata()
+    assert sum(weight["max_points"] for weight in hpg.meta["weights"]) == 100
 
 
 def test_store_upserts_on_date_timeframe_and_symbol(engine: Engine) -> None:
-    """A rerun of the session overwrites the symbols it ranks again; one that left the shortlist keeps its older row,
+    """A rerun of the session overwrites the symbols it scores again; one that left the shortlist keeps its older row,
     and the other timeframes of that date are untouched."""
     store(report(result("HPG", 70), result("AAM", 60)), engine)
-    store(report(result("HPG", 50)), engine, Timeframe.WEEKLY)
+    store(report(result("HPG", 50), timeframe=Timeframe.WEEKLY), engine)
     store(report(result("VCB", 80), result("HPG", 65)), engine)
-    assert [(row.timeframe, row.rank, row.symbol, row.score) for row in rankings(engine)] == [
-        (Timeframe.DAILY, 1, "VCB", 80),
-        (Timeframe.DAILY, 2, "AAM", 60),  # stale: not in the rerun
-        (Timeframe.DAILY, 2, "HPG", 65),
-        (Timeframe.WEEKLY, 1, "HPG", 50),
+    assert [(row.timeframe, row.symbol, row.score) for row in rankings(engine)] == [
+        (Timeframe.DAILY, "AAM", 60),  # stale: not in the rerun
+        (Timeframe.DAILY, "HPG", 65),
+        (Timeframe.DAILY, "VCB", 80),
+        (Timeframe.WEEKLY, "HPG", 50),
     ]
 
 
@@ -115,10 +128,7 @@ def test_main_writes_the_report_the_summary_and_the_ranking(
     assert text.startswith("earlier step\n## VN stock screening score")  # appended, never overwritten
     assert "| 1 | HPG |" in text
     assert log.info.call_args.args[1:4] == (dt.date(2026, 11, 10), 2, 1)  # as_of, symbols, scored
-    assert [(row.rank, row.symbol, row.score is not None) for row in rankings(engine)] == [
-        (1, "HPG", True),
-        (2, "AAM", False),
-    ]
+    assert sorted((row.symbol, row.score is not None) for row in rankings(engine)) == [("AAM", False), ("HPG", True)]
 
 
 def test_main_without_a_summary_file_logs_the_table(

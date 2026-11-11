@@ -9,6 +9,12 @@ on:
 permissions:
   contents: read
 
+# Same group as the CD workflow (groups are repository-wide): a run waits while a merge applies its migrations, so
+# vn_stock_analyze never writes to a table that is not there yet. It also keeps two analysis runs from overlapping.
+concurrency:
+  group: cd
+  cancel-in-progress: false
+
 jobs:
   start-analyze:
     runs-on: ubuntu-latest

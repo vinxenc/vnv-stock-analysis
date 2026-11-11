@@ -1,7 +1,8 @@
 """create vn_stock_rankings
 
-The ranked shortlist of every screened session, one row per timeframe and symbol (`out/vn_stock_analysis.json` kept
-for good). The Postgres enum `timeframe` is created with the table; only `daily` is written so far.
+The scores of every screened session, one row per timeframe and symbol (`out/vn_stock_analysis.json` kept for good),
+with the weights they were computed with in `metadata`. The Postgres enum `timeframe` is created with the table; only
+`daily` is written so far.
 
 Revision ID: 0006
 Revises: 0005
@@ -26,13 +27,13 @@ def upgrade() -> None:
         sa.Column("date", sa.Date(), nullable=False),
         sa.Column("timeframe", sa.Enum("daily", "weekly", "monthly", name="timeframe"), nullable=False),
         sa.Column("symbol", sa.String(), nullable=False),
-        sa.Column("rank", sa.Integer(), nullable=False),
         sa.Column("score", sa.Float(), nullable=True),
         sa.Column("coverage", sa.Float(), nullable=False),
         sa.Column("turnover", sa.Float(), nullable=False),
         sa.Column("themes", postgresql.JSONB(), nullable=False),
         sa.Column("flags", postgresql.JSONB(), nullable=False),
         sa.Column("indicators", postgresql.JSONB(), nullable=False),
+        sa.Column("metadata", postgresql.JSONB(), nullable=False),
         sa.PrimaryKeyConstraint("date", "timeframe", "symbol"),
     )
 
