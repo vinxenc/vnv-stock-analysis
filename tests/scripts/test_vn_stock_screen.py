@@ -142,18 +142,22 @@ def test_screen_drops_a_symbol_halted_today_even_with_a_high_average(engine: Eng
 def test_main_removes_an_old_shortlist_when_nobody_is_liquid(tmp_path: Path, engine: Engine) -> None:
     path = tmp_path / "liquid_symbols.csv"
     path.write_text("code\nOLD\n", encoding="utf-8")
+    screened(engine, YESTERDAY)
     store(engine, ("AAA", 1, 1, TODAY))
     assert main(path, engine, TODAY) == NO_DATA
     assert not path.exists()
+    assert history(engine) == [YESTERDAY]  # a failed screen leaves the session due: the next run retries it
 
 
 def test_main_removes_an_old_shortlist_when_the_session_is_stale(tmp_path: Path, engine: Engine) -> None:
     path = tmp_path / "liquid_symbols.csv"
     path.write_text("code\nOLD\n", encoding="utf-8")
-    store(engine, ("AAA", 10, 3_000_000, YESTERDAY))
+    screened(engine, YESTERDAY)
+    store(engine, ("AAA", 10, 3_000_000, YESTERDAY))  # no bar on TODAY yet
     with pytest.raises(RuntimeError, match="late or failed"):
         main(path, engine, TODAY)
     assert not path.exists()
+    assert history(engine) == [YESTERDAY]
 
 
 def test_main_defaults_to_today_in_vietnam(tmp_path: Path, engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -214,14 +218,6 @@ def test_main_has_nothing_to_do_when_the_next_session_is_after_today(tmp_path: P
     assert history(engine) == [TODAY]
 
 
-def test_main_screens_monday_after_the_weekend(tmp_path: Path, engine: Engine) -> None:
-    monday = TODAY + dt.timedelta(days=3)
-    screened(engine, TODAY)
-    store(engine, ("AAA", 10, 3_000_000, TODAY), ("AAA", 10, 3_000_000, monday))
-    assert main(tmp_path / "liquid_symbols.csv", engine, monday) == 0
-    assert history(engine) == [TODAY, monday]
-
-
 def test_main_catches_up_one_session_at_a_time(tmp_path: Path, engine: Engine) -> None:
     """The cron was dropped: Friday, Monday and Tuesday are due and all stored. Each run does the oldest one."""
     monday, tuesday = TODAY + dt.timedelta(days=3), TODAY + dt.timedelta(days=4)
@@ -232,21 +228,6 @@ def test_main_catches_up_one_session_at_a_time(tmp_path: Path, engine: Engine) -
         assert main(path, engine, tuesday) == 0
         assert history(engine)[-1] == expected
     assert main(path, engine, tuesday) == NOT_DUE
-
-
-def test_main_a_stale_session_leaves_the_history_alone(tmp_path: Path, engine: Engine) -> None:
-    screened(engine, YESTERDAY)
-    store(engine, ("AAA", 10, 3_000_000, YESTERDAY))  # no bar on TODAY yet: the sync is late
-    with pytest.raises(RuntimeError, match="late or failed"):
-        main(tmp_path / "liquid_symbols.csv", engine, TODAY)
-    assert history(engine) == [YESTERDAY]  # the next run retries TODAY
-
-
-def test_main_nobody_liquid_leaves_the_history_alone(tmp_path: Path, engine: Engine) -> None:
-    screened(engine, YESTERDAY)
-    store(engine, ("AAA", 1, 1, YESTERDAY), ("AAA", 1, 1, TODAY))
-    assert main(tmp_path / "liquid_symbols.csv", engine, TODAY) == NO_DATA
-    assert history(engine) == [YESTERDAY]
 
 
 @pytest.fixture

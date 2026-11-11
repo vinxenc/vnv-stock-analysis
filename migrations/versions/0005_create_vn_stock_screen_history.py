@@ -9,7 +9,6 @@ Create Date: 2026-11-11 19:35:00
 """
 
 import datetime as dt
-import os
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -22,12 +21,10 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Create the table, then (not under $ENVIRONMENT=test, like every seed migration) insert the baseline."""
     table = op.create_table(
         "vn_stock_screen_history", sa.Column("date", sa.Date(), nullable=False), sa.PrimaryKeyConstraint("date")
     )
-    if os.environ.get("ENVIRONMENT") != "test":
-        op.bulk_insert(table, [{"date": dt.date(2026, 11, 10)}])
+    op.bulk_insert(table, [{"date": dt.date(2026, 11, 10)}])  # the tests empty the table in their `engine` fixture
 
 
 def downgrade() -> None:

@@ -28,20 +28,6 @@ depends_on: str | Sequence[str] | None = None
 
 SEED = Path(__file__).parents[2] / "data" / "seeds" / "prices_2026_11_09.json.gz"
 
-# a frozen copy of the table: a migration must not import the models, which change after it
-prices = sa.table(
-    "prices",
-    sa.column("symbol", sa.String),
-    sa.column("date", sa.Date),
-    sa.column("source", sa.String),
-    sa.column("unit", sa.String),
-    sa.column("open", sa.Float),
-    sa.column("high", sa.Float),
-    sa.column("low", sa.Float),
-    sa.column("close", sa.Float),
-    sa.column("volume", sa.BigInteger),
-)
-
 
 def upgrade() -> None:
     """Fill the missing (symbol, date) rows: one the daily sync already stored is never replaced by the seed's value.
@@ -52,9 +38,8 @@ def upgrade() -> None:
         return
     with gzip.open(SEED, "rt", encoding="utf-8") as file:
         rows = [{**row, "date": dt.date.fromisoformat(row["date"])} for row in json.load(file)]
-    op.execute(
-        insert(prices).values(rows).on_conflict_do_nothing(index_elements=["symbol", "date"])
-    )  # 381 rows: one batch
+    prices = sa.Table("prices", sa.MetaData(), autoload_with=op.get_bind())  # the table as it is at this revision
+    op.execute(insert(prices).values(rows).on_conflict_do_nothing(index_elements=["symbol", "date"]))  # 381 rows
 
 
 def downgrade() -> None:
