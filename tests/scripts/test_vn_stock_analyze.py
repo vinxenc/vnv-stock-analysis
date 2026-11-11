@@ -47,15 +47,12 @@ def rankings(engine: Engine) -> list[Ranking]:
         return list(session.exec(select(Ranking).order_by(Ranking.date, Ranking.timeframe, Ranking.symbol)))
 
 
-def test_store_writes_one_row_per_symbol_with_the_weights(engine: Engine) -> None:
-    """A null score for insufficient data; the JSONB columns round-trip; every row carries the scoring weights."""
-    store(report(result("HPG", 71.5, [Flag.CEILING_LOCKED]), result("AAM", None)), engine)
+def test_store_writes_one_row_per_scored_symbol_with_the_weights(engine: Engine) -> None:
+    """Insufficient data (null) and 0 points are skipped; the JSONB columns round-trip; each row carries the weights."""
+    store(report(result("HPG", 71.5, [Flag.CEILING_LOCKED]), result("AAM", None), result("VCB", 0)), engine)
     rows = rankings(engine)
-    assert [(row.date, row.timeframe, row.symbol, row.score) for row in rows] == [
-        (DAY, Timeframe.DAILY, "AAM", None),
-        (DAY, Timeframe.DAILY, "HPG", 71.5),
-    ]
-    hpg = rows[1]
+    assert [(row.date, row.timeframe, row.symbol, row.score) for row in rows] == [(DAY, Timeframe.DAILY, "HPG", 71.5)]
+    hpg = rows[0]
     assert hpg.flags == ["ceiling_locked"]
     assert hpg.themes["trend"] == 2.5
     assert hpg.indicators[0]["raw"] == {"close_vs_sma20": 0.02}
@@ -128,7 +125,7 @@ def test_main_writes_the_report_the_summary_and_the_ranking(
     assert text.startswith("earlier step\n## VN stock screening score")  # appended, never overwritten
     assert "| 1 | HPG |" in text
     assert log.info.call_args.args[1:4] == (dt.date(2026, 11, 10), 2, 1)  # as_of, symbols, scored
-    assert sorted((row.symbol, row.score is not None) for row in rankings(engine)) == [("AAM", False), ("HPG", True)]
+    assert [row.symbol for row in rankings(engine)] == ["HPG"]  # AAM has no score: not stored
 
 
 def test_main_without_a_summary_file_logs_the_table(
@@ -163,3 +160,4 @@ def test_real_hpg_and_aam_history_end_to_end(tmp_path: Path, monkeypatch: pytest
     assert close_location["HPG"].status == IndicatorStatus.SCORED
     assert close_location["AAM"].status == IndicatorStatus.UNAVAILABLE  # high == low on the last session
     assert all(item.status == IndicatorStatus.UNAVAILABLE for item in aam.indicators if item.id in (5, 7, 17, 24))
+    assert rankings(engine) == []  # neither has a score: nothing stored, nothing sent

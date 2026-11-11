@@ -1,12 +1,12 @@
 """Score the shortlisted symbols from their price history (Phase 1, no LLM).
 
 Usage: uv run python -m scripts.vn_stock_analyze [history_dir] [output_json]
-Default: out/vn_stock_history (see vn_stock_get_history) -> out/vn_stock_analysis.json, and the ranking upserted into
-`vn_stock_rankings` (needs $DATABASE_URL). No network: it reads the history files and
-data/hose_symbols.csv (the listing dates). The history comes from `prices` and is taken as correct: each file is
-ascending by date and ends on the session analysed (the screen already required a bar on it), so nothing is re-checked
-here. A rerun of a session overwrites the row of every symbol it scores again; a symbol that left the shortlist keeps
-its older row. The ranked table goes to $GITHUB_STEP_SUMMARY when it is set, else to the log.
+Default: out/vn_stock_history (see vn_stock_get_history) -> out/vn_stock_analysis.json, and the symbols with a score
+above 0 upserted into `vn_stock_rankings` (needs $DATABASE_URL). No network: it reads the history files and
+data/hose_symbols.csv (the listing dates). The history comes from `vn_stock_prices` and is taken as correct: each file
+is ascending by date and ends on the session analysed (the screen already required a bar on it), so nothing is
+re-checked here. A rerun of a session overwrites the row of every symbol it scores again; a symbol that left the
+shortlist keeps its older row. The ranked table goes to $GITHUB_STEP_SUMMARY when it is set, else to the log.
 Exit 0 = analysed and stored, 4 = no history file (nothing to analyse), anything else = crash.
 """
 
@@ -44,7 +44,8 @@ def read_listed_dates(path: Path = SYMBOLS_CSV) -> dict[str, dt.date]:
 
 
 def store(report: AnalysisReport, engine: Engine) -> None:
-    """Upsert one row per symbol, keyed on (date, timeframe, symbol): a rerun overwrites the symbols it scores again."""
+    """Upsert one row per symbol with a score above 0, keyed on (date, timeframe, symbol): a rerun overwrites the
+    symbols it scores again. Insufficient data (null) and 0 points are not stored; the JSON and summary keep them."""
     meta = scoring.metadata()
     rows = [
         {
@@ -60,7 +61,10 @@ def store(report: AnalysisReport, engine: Engine) -> None:
             "metadata": meta,
         }
         for result in report.symbols
+        if result.score  # None (insufficient data) or 0
     ]
+    if not rows:
+        return
     statement = insert(Ranking)
     keys = Ranking.__table__.primary_key.columns
     update = {column.key: column for column in statement.excluded if column.key not in keys}
