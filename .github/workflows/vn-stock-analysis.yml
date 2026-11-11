@@ -130,7 +130,8 @@ jobs:
     name: vn stock analyze
     needs: vn_stock_get_history  # skipped with it: a skipped need skips its dependents
     runs-on: ubuntu-latest
-    timeout-minutes: 10  # a few seconds of computing; no database, no network
+    timeout-minutes: 10  # a few seconds of computing; the script has its own database timeouts
+    environment: production  # DATABASE_URL is an environment secret, limited to master
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -141,8 +142,11 @@ jobs:
           name: vn-stock-history
           path: out/vn_stock_history
       - name: Score the shortlist
-        # exits 0 after writing the JSON and the ranked table to the job summary, 4 when there is no history
+        # exits 0 after writing the JSON, upserting the ranking into vn_stock_rankings and writing the ranked table to the
+        # job summary, 4 when there is no history
         run: uv run --no-sync python -m scripts.vn_stock_analyze
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: vn-stock-analysis
@@ -154,8 +158,8 @@ jobs:
         with:
           pipeline: vn_stock_analyze
           job-status: ${{ job.status }}
-          success-message: Scored the shortlist, ranking in the job summary
-          failure-message: Pipeline failed, can not score the shortlist
+          success-message: Scored the shortlist, ranking stored and in the job summary
+          failure-message: Pipeline failed, can not score the shortlist or store the ranking
 
   # Last, so a session that failed anywhere stays due and the next run redoes it.
   vn_stock_screen_done:

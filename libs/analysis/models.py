@@ -20,6 +20,14 @@ class Theme(StrEnum):
     REVERSAL = "reversal"
 
 
+class Timeframe(StrEnum):
+    """The bar size a ranking is computed on. Only daily is computed today; weekly and monthly are reserved."""
+
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
 class IndicatorStatus(StrEnum):
     SCORED = "scored"
     GATE_CLOSED = "gate_closed"  # a gate decided it counts for nothing today: 0 points, but available
@@ -59,6 +67,7 @@ class SymbolResult(Model):
 
 class AnalysisReport(Model):
     as_of: dt.date  # the session analysed: the newest date in the history
+    timeframe: Timeframe = Timeframe.DAILY  # the bar size of the history
     universe_size: int = Field(ge=0)  # symbols in data/hose_symbols.csv; the shortlist is len(symbols)
     sources: list[str]  # price sources found in the history, e.g. ["DNSE", "VNDirect"]
     symbols: list[SymbolResult]  # ranked: score descending, ties by turnover, symbols without a score last

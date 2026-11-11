@@ -1,8 +1,11 @@
 import datetime as dt
 
 from pydantic import ConfigDict
-from sqlalchemy import BigInteger
+from sqlalchemy import BigInteger, Column, Enum
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
+
+from libs.analysis.models import Timeframe
 
 
 class Price(SQLModel, table=True):
@@ -33,3 +36,25 @@ class ScreenHistory(SQLModel, table=True):
     __tablename__ = "vn_stock_screen_history"
 
     date: dt.date = Field(primary_key=True)
+
+
+class Ranking(SQLModel, table=True):
+    """The scores of one screened session, one row per timeframe and symbol: `out/vn_stock_analysis.json` kept for
+    good (the artifact expires after 7 days). Upserted by `vn_stock_analyze.store`. No rank column: a rerun can leave
+    rows of symbols that left the shortlist, so the order is read from the scores (`score DESC NULLS LAST, turnover
+    DESC`)."""
+
+    __tablename__ = "vn_stock_rankings"
+
+    date: dt.date = Field(primary_key=True)  # the session analysed (`as_of`)
+    # Postgres enum `timeframe` of the values ("daily"); adding one later needs `ALTER TYPE ... ADD VALUE`
+    timeframe: Timeframe = Field(primary_key=True, sa_type=Enum(*Timeframe, name="timeframe"))
+    symbol: str = Field(primary_key=True)
+    score: float | None  # None = insufficient data
+    coverage: float
+    turnover: float  # average close × volume over 20 sessions, thousand VND
+    themes: dict[str, float] = Field(sa_type=JSONB)
+    flags: list[str] = Field(sa_type=JSONB)
+    indicators: list[dict] = Field(sa_type=JSONB)  # the raw numbers behind every point, to tune the thresholds later
+    # the weights the score was computed with (`scoring.metadata()`); `metadata` is taken by SQLModel, hence `meta`
+    meta: dict = Field(sa_column=Column("metadata", JSONB, nullable=False))
