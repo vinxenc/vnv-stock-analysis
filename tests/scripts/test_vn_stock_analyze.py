@@ -4,11 +4,64 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import Engine
+from sqlmodel import Session, select
 
-from libs.analysis.models import AnalysisReport, IndicatorStatus
+from libs.analysis.models import AnalysisReport, Flag, IndicatorResult, IndicatorStatus, SymbolResult, Theme
 from libs.constants import NO_DATA
-from scripts.vn_stock_analyze import load_history, main, read_listed_dates
+from libs.db.models import Ranking, Timeframe
+from scripts.vn_stock_analyze import load_history, main, read_listed_dates, store
 from tests.libs.analysis.fakes import make_rows
+
+DAY = dt.date(2026, 11, 10)
+
+
+def result(code: str, score: float | None, flags: list[Flag] | None = None) -> SymbolResult:
+    indicator = IndicatorResult(
+        id=1, theme=Theme.TREND, status=IndicatorStatus.SCORED, points=2.5, max_points=3, raw={"close_vs_sma20": 0.02}
+    )
+    themes = {theme: 2.5 if theme == Theme.TREND else 0.0 for theme in Theme}
+    return SymbolResult(
+        symbol=code, score=score, coverage=80, turnover=1e6, themes=themes, indicators=[indicator], flags=flags or []
+    )
+
+
+def report(*symbols: SymbolResult) -> AnalysisReport:
+    return AnalysisReport(as_of=DAY, universe_size=406, sources=["DNSE"], symbols=list(symbols))
+
+
+def rankings(engine: Engine) -> list[Ranking]:
+    with Session(engine) as session:
+        return list(
+            session.exec(select(Ranking).order_by(Ranking.date, Ranking.timeframe, Ranking.rank, Ranking.symbol))
+        )
+
+
+def test_store_writes_one_row_per_symbol_in_rank_order(engine: Engine) -> None:
+    """The unscored symbol last with a null score; the JSONB columns round-trip."""
+    store(report(result("HPG", 71.5, [Flag.CEILING_LOCKED]), result("AAM", None)), engine)
+    rows = rankings(engine)
+    assert [(row.date, row.timeframe, row.rank, row.symbol, row.score) for row in rows] == [
+        (DAY, Timeframe.DAILY, 1, "HPG", 71.5),
+        (DAY, Timeframe.DAILY, 2, "AAM", None),
+    ]
+    assert rows[0].flags == ["ceiling_locked"]
+    assert rows[0].themes["trend"] == 2.5
+    assert rows[0].indicators[0]["raw"] == {"close_vs_sma20": 0.02}
+
+
+def test_store_upserts_on_date_timeframe_and_symbol(engine: Engine) -> None:
+    """A rerun of the session overwrites the symbols it ranks again; one that left the shortlist keeps its older row,
+    and the other timeframes of that date are untouched."""
+    store(report(result("HPG", 70), result("AAM", 60)), engine)
+    store(report(result("HPG", 50)), engine, Timeframe.WEEKLY)
+    store(report(result("VCB", 80), result("HPG", 65)), engine)
+    assert [(row.timeframe, row.rank, row.symbol, row.score) for row in rankings(engine)] == [
+        (Timeframe.DAILY, 1, "VCB", 80),
+        (Timeframe.DAILY, 2, "AAM", 60),  # stale: not in the rerun
+        (Timeframe.DAILY, 2, "HPG", 65),
+        (Timeframe.WEEKLY, 1, "HPG", 50),
+    ]
 
 
 def write_history(directory: Path, symbol: str, count: int) -> None:
@@ -41,7 +94,9 @@ def test_main_without_history_is_no_data_and_removes_an_older_output(tmp_path: P
     assert not output.exists()  # an older analysis must not pass for today's
 
 
-def test_main_writes_the_report_and_the_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_writes_the_report_the_summary_and_the_ranking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine: Engine
+) -> None:
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     history_dir = tmp_path / "history"
     history_dir.mkdir()
@@ -52,7 +107,7 @@ def test_main_writes_the_report_and_the_summary(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
     log = MagicMock()
 
-    assert main(history_dir, output, log=log) == 0
+    assert main(history_dir, output, engine, log=log) == 0
 
     report = AnalysisReport.model_validate_json(output.read_text(encoding="utf-8"))  # the contract Phase 2 reads
     assert [(item.symbol, item.score is not None) for item in report.symbols] == [("HPG", True), ("AAM", False)]
@@ -60,17 +115,23 @@ def test_main_writes_the_report_and_the_summary(tmp_path: Path, monkeypatch: pyt
     assert text.startswith("earlier step\n## VN stock screening score")  # appended, never overwritten
     assert "| 1 | HPG |" in text
     assert log.info.call_args.args[1:4] == (dt.date(2026, 11, 10), 2, 1)  # as_of, symbols, scored
+    assert [(row.rank, row.symbol, row.score is not None) for row in rankings(engine)] == [
+        (1, "HPG", True),
+        (2, "AAM", False),
+    ]
 
 
-def test_main_without_a_summary_file_logs_the_table(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_without_a_summary_file_logs_the_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine: Engine
+) -> None:
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
     write_history(tmp_path, "HPG", 30)
     log = MagicMock()
-    assert main(tmp_path, tmp_path / "analysis.json", log=log) == 0
+    assert main(tmp_path, tmp_path / "analysis.json", engine, log=log) == 0
     assert "| 1 | HPG |" in log.info.call_args_list[0].args[1]
 
 
-def test_real_hpg_and_aam_history_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_real_hpg_and_aam_history_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, engine: Engine) -> None:
     """Real DNSE history (31-33 sessions): HPG is very liquid, AAM almost untraded and locked on its last two days.
 
     Neither has the 61 rows a score needs, so both are `insufficient data`: the ranking falls back on turnover.
@@ -82,7 +143,7 @@ def test_real_hpg_and_aam_history_end_to_end(tmp_path: Path, monkeypatch: pytest
         (tmp_path / f"{symbol}.json").write_text(json.dumps(symbol_rows), encoding="utf-8")
     output = tmp_path / "analysis.json"
 
-    assert main(tmp_path, output, log=MagicMock()) == 0
+    assert main(tmp_path, output, engine, log=MagicMock()) == 0
 
     report = AnalysisReport.model_validate_json(output.read_text(encoding="utf-8"))
     hpg, aam = report.symbols

@@ -44,9 +44,9 @@ def alembic_config(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Config:
 
 @pytest.fixture
 def engine(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Engine:
-    """Empty `prices` and `vn_stock_screen_history` for every test."""
+    """Empty `prices`, `vn_stock_screen_history` and `vn_stock_rankings` for every test."""
     monkeypatch.setenv("DATABASE_URL", pg_url)
     engine = connect()
     with engine.begin() as connection:
-        connection.execute(text("TRUNCATE prices, vn_stock_screen_history"))
+        connection.execute(text("TRUNCATE prices, vn_stock_screen_history, vn_stock_rankings"))
     return engine

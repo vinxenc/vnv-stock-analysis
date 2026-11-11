@@ -18,7 +18,12 @@ def test_migrations_roundtrip_and_match_the_models(alembic_config: Config) -> No
     assert inspect(engine).get_table_names() == ["alembic_version"]
     command.upgrade(alembic_config, "head")
     command.check(alembic_config)
-    assert set(inspect(engine).get_table_names()) == {"alembic_version", "prices", "vn_stock_screen_history"}
+    assert set(inspect(engine).get_table_names()) == {
+        "alembic_version",
+        "prices",
+        "vn_stock_screen_history",
+        "vn_stock_rankings",
+    }
     assert {index["name"] for index in inspect(engine).get_indexes("prices")} == {"ix_prices_date"}
     engine.dispose()
 

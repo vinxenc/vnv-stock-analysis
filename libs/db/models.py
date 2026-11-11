@@ -1,7 +1,9 @@
 import datetime as dt
+from enum import StrEnum
 
 from pydantic import ConfigDict
-from sqlalchemy import BigInteger
+from sqlalchemy import BigInteger, Enum
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 
@@ -33,3 +35,32 @@ class ScreenHistory(SQLModel, table=True):
     __tablename__ = "vn_stock_screen_history"
 
     date: dt.date = Field(primary_key=True)
+
+
+class Timeframe(StrEnum):
+    """The bar size a ranking is computed on. Only daily is computed today; weekly and monthly are reserved."""
+
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
+class Ranking(SQLModel, table=True):
+    """The ranked shortlist of one screened session, one row per symbol: `out/vn_stock_analysis.json` kept for good
+    (the artifact expires after 7 days). Written by `vn_stock_screen_done` with the session's history row."""
+
+    __tablename__ = "vn_stock_rankings"
+
+    date: dt.date = Field(primary_key=True)  # the session analysed (`as_of`)
+    # Postgres enum `timeframe`, stored by value ("daily"); adding a value later needs `ALTER TYPE ... ADD VALUE`
+    timeframe: Timeframe = Field(
+        primary_key=True, sa_type=Enum(Timeframe, name="timeframe", values_callable=lambda e: [m.value for m in e])
+    )
+    symbol: str = Field(primary_key=True)
+    rank: int = Field(ge=1)  # the position in the job summary table; symbols without a score come last
+    score: float | None  # None = insufficient data
+    coverage: float
+    turnover: float  # average close × volume over 20 sessions, thousand VND
+    themes: dict[str, float] = Field(sa_type=JSONB)
+    flags: list[str] = Field(sa_type=JSONB)
+    indicators: list[dict] = Field(sa_type=JSONB)  # the raw numbers behind every point, to tune the thresholds later
