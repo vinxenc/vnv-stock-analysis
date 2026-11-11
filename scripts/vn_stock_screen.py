@@ -1,12 +1,17 @@
-"""Drop the illiquid symbols: write the codes whose average turnover over their last 20 sessions up to today is at
-least 20 billion VND per session (today = Vietnam time).
+"""Drop the illiquid symbols: write the codes whose average turnover over their last 20 sessions up to the session
+screened is at least 20 billion VND per session.
 
 Usage: DATABASE_URL=... uv run python -m scripts.vn_stock_screen [output_csv]
 Default: out/liquid_symbols.csv (a `code` column, same shape as data/hose_symbols.csv)
-Fails (crash, exit 1) unless the newest session in `prices` is today: the sync has not finished or failed, and old data
-must not be reported as fresh. Also fails when fewer than MIN_COVERAGE of the previous session's symbols have a bar
-today: a partial sync would silently shrink the shortlist.
-Exit 0 = shortlist written, 4 = nobody is liquid enough (nothing written), anything else = crash.
+The session screened is the first working day (weekends and public holidays skipped) after the newest row of
+`vn_stock_screen_history`, not the wall-clock day: a cron run that GitHub delays past midnight (Vietnam time) still
+screens the right session. When that session is after today there is nothing to do yet. A screen that succeeds adds its
+session to the history, so the next run moves on; an empty history screens today.
+Fails (crash, exit 1) unless the session screened has bars in `prices`: the sync has not finished or failed, and old
+data must not be reported as fresh. Also fails when fewer than MIN_COVERAGE of the previous session's symbols have a
+bar on it: a partial sync would silently shrink the shortlist.
+Exit 0 = shortlist written, 4 = nobody is liquid enough (nothing written), 5 = nothing to screen yet (nothing
+written), anything else = crash.
 """
 
 import csv
@@ -17,18 +22,28 @@ from pathlib import Path
 from sqlalchemy import Engine, case, func
 from sqlmodel import Session, select
 
-from libs.constants import MIN_COVERAGE, NO_DATA, VN_TZ
+from libs.constants import MIN_COVERAGE, NO_DATA, NOT_DUE, VN_TZ
 from libs.db import connect
-from libs.db.models import Price
+from libs.db.models import Price, ScreenHistory
 from libs.logger import Logger, LogxideLogger
+from scripts.vn_holiday import off_reason
 
 MIN_TURNOVER = 20_000_000  # thousand VND (prices are in thousand VND) = 20 billion VND per session
 SESSIONS = 20  # rows, not calendar days (holidays); a symbol with fewer rows is averaged over the rows it has
 logger = LogxideLogger("vn_stock_screen")
 
 
+def next_session(last: dt.date) -> dt.date:
+    """The first working day after `last`: weekends and Vietnamese public holidays are skipped."""
+    day = last + dt.timedelta(days=1)
+    while off_reason(day):
+        day += dt.timedelta(days=1)
+    return day
+
+
 def screen(engine: Engine, today: dt.date, log: Logger = logger) -> list[str]:
-    """Symbols that traded today and whose average `close × volume` over their last SESSIONS rows is >= MIN_TURNOVER.
+    """Symbols that traded on `today` and whose average `close × volume` over their last SESSIONS rows up to it is >=
+    MIN_TURNOVER. `today` is the session screened, which may be before the real today (see the module docstring).
 
     Sorted. A symbol with no row today, or a halted one (volume 0 today), is dropped whatever its average. A halted
     earlier day counts as 0 turnover. A symbol with fewer than SESSIONS rows is averaged over the rows it has.
@@ -45,9 +60,15 @@ def screen(engine: Engine, today: dt.date, log: Logger = logger) -> list[str]:
         .subquery()
     )
     with Session(engine) as session:
-        newest = session.exec(  # the last two sessions with their number of bars
-            select(Price.date, func.count()).group_by(Price.date).order_by(Price.date.desc()).limit(2)
-        ).all()
+        newest = (
+            session.exec(  # the last two sessions up to `today` with their number of bars (later ones are not ours)
+                select(Price.date, func.count())
+                .where(Price.date <= today)
+                .group_by(Price.date)
+                .order_by(Price.date.desc())
+                .limit(2)
+            ).all()
+        )
         latest = newest[0][0] if newest else None
         if latest != today:
             raise RuntimeError(f"newest session in prices is {latest}, expected {today}: the sync is late or failed")
@@ -84,7 +105,15 @@ def main(
     log: Logger = logger,
 ) -> int:
     output_csv.unlink(missing_ok=True)  # an older shortlist must not pass for today's, whatever happens next
-    liquid = screen(engine or connect(), today or dt.datetime.now(VN_TZ).date(), log)
+    engine = engine or connect()
+    today = today or dt.datetime.now(VN_TZ).date()
+    with Session(engine) as session:
+        last = session.exec(select(func.max(ScreenHistory.date))).one()
+    day = next_session(last) if last else today  # an empty history (a fresh database): screen today
+    if day > today:
+        log.info("%s is screened, the next session %s is after today %s: nothing to screen yet", last, day, today)
+        return NOT_DUE
+    liquid = screen(engine, day, log)
     if not liquid:
         log.error("no symbol reaches the turnover threshold, nothing written")
         return NO_DATA
@@ -93,6 +122,9 @@ def main(
         writer = csv.writer(file)
         writer.writerow(["code"])
         writer.writerows([code] for code in liquid)
+    with Session(engine) as session:  # last: a failed screen leaves the session due, the next run retries it
+        session.add(ScreenHistory(date=day))
+        session.commit()
     return 0
 
 

@@ -1,17 +1,18 @@
 # Phase 1 — Screens and analysis (no LLM)
 
-Status: **built, waiting for the first real run on GitHub** (2026-11-10): steps 1–4 are implemented, see "Decisions and open items" and the checklist of step 4. Next phase: [phase-2-llm-summary.md](phase-2-llm-summary.md).
+Status: **built, waiting for the first real run on GitHub** (2026-11-11): steps 1–4 are implemented, the screen takes its session from a history table (see the 2026-11-11 decision), see "Decisions and open items" and the checklist of step 4. Next phase: [phase-2-llm-summary.md](phase-2-llm-summary.md).
 
 Option 1 = "build a short list from the data, then one LLM call writes the summary", split into 2 phases: **Phase 1 has no LLM**, Phase 2 adds the LLM call.
 
 ## Decisions and open items
 
 Decided by the user:
+- 2026-11-11: the screen no longer asks "is the newest session today?". Why: GitHub delayed the crons by 8–10 hours, so runs started after midnight (Vietnam time) and expected tomorrow's session (4 analysis runs failed that way), and the sync run of 2026-11-09 lost its store job, which left a hole that the 90% coverage guard then reported as an incomplete sync. Now: table `vn_stock_screen_history` (`date`, primary key) holds the screened sessions, seeded with 2026-11-10 (migration `0005`); the screen takes the first working day after the newest row (weekends and public holidays skipped with `scripts/vn_holiday.off_reason`); when that day is after today it exits 5 (`NOT_DUE`) and the workflow skips the later jobs; otherwise it screens that day (the bars up to it only) and adds it to the history after writing the shortlist. The `is_holiday` job of the analysis workflow is gone (the screen covers a day off itself; it checked the wall-clock day, so a Friday run delayed past midnight would have been skipped as a Saturday). `vn_stock_get_history` stops at the newest history row. The missing session of 2026-11-09 was backfilled by migration `0004` (381 bars from the artifact of that day's retrieval job; no price jump against 2026-11-06, all within the ±7% band). 2026-11-10 itself is not screened (the baseline row stands for it).
 - 2026-11-06: both crons moved 30 minutes earlier, sync 14:45 VN (`45 7 * * 1-5`) and analysis 15:45 VN (`45 8 * * 1-5`), keeping the one-hour gap. The sync now starts before the 15:00 close; the user accepted this. The line below is the earlier move.
 - 2026-10-31: crons moved again, sync 15:15 VN (`15 8 * * 1-5`) and analysis 16:15 VN (`15 9 * * 1-5`), keeping the 15-minute offset. The line below is the earlier move.
 - 2026-10-30: both crons moved 15 minutes later, sync 20:15 VN (`15 13 * * 1-5`) and analysis 22:15 VN (`15 15 * * 1-5`): GitHub delays runs scheduled on the hour the most (one analysis run started 5 hours late). The times below say 20:00 / 22:00 for the plan's original design.
 - New pipeline, not a replacement: the existing sync workflow keeps filling `prices`, now at 20:00 VN (it was 22:00); the analysis is a second workflow.
-- Schedule: GitHub Actions only, 15:00 UTC (22:00 Vietnam), Mon–Fri. `is_holiday` checks **today**: a day off → the rest is skipped, otherwise the later jobs run. The session analysed is today's (the market closed at 15:00 VN).
+- Schedule: GitHub Actions only, 15:00 UTC (22:00 Vietnam), Mon–Fri. `is_holiday` checks **today**: a day off → the rest is skipped, otherwise the later jobs run. The session analysed is today's (the market closed at 15:00 VN). *Superseded on 2026-11-11: no `is_holiday` job, the session comes from `vn_stock_screen_history`, see the first decision above.*
 - Ordering: the sync runs at 20:00 VN and takes about 20 min, the analysis starts at 22:00 VN, so the prices are stored well before. A late or failed sync is caught by the date check in `vn_stock_screen`.
 - Liquidity filter: **average** turnover (`close × volume`) over the last **20 sessions** ≥ **20 billion VND** (changed from the latest session only, 2026-10-29).
 - Jobs: `vn_stock_screen`, `vn_stock_get_history` (reads the existing DB, never writes), `vn_stock_analyze`; the LLM job comes in Phase 2.
@@ -32,8 +33,9 @@ existing workflow "VN Stock Prices Sync" (vn-stock-prices-sync.yml), unchanged: 
   … → retrieve_prices → vn_stock_daily_price_store      latest bar of all 406 symbols → prices
 
 NEW workflow "VN Stock Analysis" (vn-stock-analysis.yml): cron 15:00 UTC = 22:00 Vietnam, Mon–Fri (two hours after the sync)
-  start-analyze → install → is_holiday (is TODAY a working day?)
-    → vn_stock_screen        drop illiquid symbols      → shortlist (artifact)
+  start-analyze → install
+    → vn_stock_screen        next session after vn_stock_screen_history (none due yet: the rest is skipped);
+                             drop its illiquid symbols  → shortlist (artifact) + a history row   [2026-11-11: no is_holiday job]
     → vn_stock_get_history   history of the shortlist, read from the DB → history (artifact)
     → vn_stock_analyze       features, signals, ranking → JSON artifact + job summary
     → notification
@@ -99,7 +101,7 @@ Every new job follows the existing pattern: `environment: production` when it ne
 
 - [x] A manual run against a local DB with fake data gives the right shortlist, history and JSON. Done on the real local database (sync of 2026-11-10 plus the DNSE bars of 2026-11-09): 88 symbols screened, 87 scored.
 - [ ] A real `workflow_dispatch` run shows the score table in the job summary. **Not done yet: needs a push and a run on GitHub.**
-- [ ] A day off: all jobs after `is_holiday` are skipped. A failed sync (no bar for today): `vn_stock_screen` fails instead of reporting old data. The sync workflow's cron and jobs are unchanged. **Not verified on GitHub yet** (the screen's stale-session failure is covered by its unit tests).
+- [ ] A day off, or a session already screened: `vn_stock_screen` exits 5 and all jobs after it are skipped (no `is_holiday` job since 2026-11-11). A failed sync (no bar on the session due): `vn_stock_screen` fails instead of reporting old data, and the next run retries that session. The sync workflow's cron and jobs are unchanged. **Not verified on GitHub yet** (covered by the screen's unit tests).
 - [x] `uv run pytest` ≥ 95% coverage, ruff clean. (98.1%)
 
 ## Scoring design (buy side, trend / breakout profile)

@@ -45,45 +45,36 @@ jobs:
           success-message: Dependencies installed
           failure-message: Pipeline failed, can not install dependencies
 
-  is_holiday:
-    needs: install
-    runs-on: ubuntu-latest
-    outputs:
-      holiday: ${{ steps.check.outputs.holiday }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-env
-      - uses: ./.github/actions/check-holiday
-        id: check
-      - if: always()
-        uses: ./.github/actions/pipeline-state
-        with:
-          pipeline: is_holiday
-          job-status: ${{ job.status }}
-          success-message: ${{ steps.check.outputs.holiday == 'true' && 'Today is Holiday, Pipeline will ignore' || 'Today is a working day' }}
-          failure-message: Pipeline failed, can not check the holiday
-          success-level: ${{ steps.check.outputs.holiday == 'true' && 'warning' || 'info' }}
-
   vn_stock_screen:
     name: vn stock screen
-    needs: is_holiday
-    if: needs.is_holiday.outputs.holiday == 'false'
+    needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 10  # the script has its own database timeouts; this is the backstop
     environment: production  # DATABASE_URL is an environment secret, limited to master
+    outputs:
+      screened: ${{ steps.screen.outputs.screened }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-env
       - name: Screen the liquid symbols
-        # exits 0 with a CSV, 4 when nobody is liquid enough; a stale session crashes; any non-zero code fails the job
-        run: uv run --no-sync python -m scripts.vn_stock_screen
+        id: screen
+        # The script screens the working day after the newest row of vn_stock_screen_history, so it also covers a day off
+        # and a run that GitHub delayed past midnight. Exit 0 = shortlist written, 5 = the next session is after today
+        # (nothing to do, the jobs below are skipped); 4 (nobody liquid) or a crash (stale prices) fails the job.
+        run: |
+          rc=0
+          uv run --no-sync python -m scripts.vn_stock_screen || rc=$?
+          case "$rc" in
+            0) echo "screened=true" >> "$GITHUB_OUTPUT" ;;
+            5) echo "screened=false" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$rc" ;;
+          esac
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      - if: steps.screen.outputs.screened == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: vn-stock-screen
           path: out/liquid_symbols.csv
@@ -94,12 +85,14 @@ jobs:
         with:
           pipeline: vn_stock_screen
           job-status: ${{ job.status }}
-          success-message: Screened the liquid symbols
+          success-message: ${{ steps.screen.outputs.screened == 'true' && 'Screened the liquid symbols' || 'Nothing to screen yet, the next session is after today' }}
           failure-message: Pipeline failed, can not screen the liquid symbols (stale prices or none liquid)
+          success-level: ${{ steps.screen.outputs.screened == 'true' && 'info' || 'warning' }}
 
   vn_stock_get_history:
     name: vn stock get history
     needs: vn_stock_screen
+    if: needs.vn_stock_screen.outputs.screened == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10  # the script has its own database timeouts; this is the backstop
     environment: production  # DATABASE_URL is an environment secret, limited to master
@@ -133,7 +126,7 @@ jobs:
 
   vn_stock_analyze:
     name: vn stock analyze
-    needs: vn_stock_get_history
+    needs: vn_stock_get_history  # skipped with it: a skipped need skips its dependents
     runs-on: ubuntu-latest
     timeout-minutes: 10  # a few seconds of computing; no database, no network
     steps:
@@ -163,7 +156,7 @@ jobs:
           failure-message: Pipeline failed, can not score the shortlist
 
   notification:
-    needs: [start-analyze, install, is_holiday, vn_stock_screen, vn_stock_get_history, vn_stock_analyze]  # each job added to this workflow goes here too
+    needs: [start-analyze, install, vn_stock_screen, vn_stock_get_history, vn_stock_analyze]  # each job added to this workflow goes here too
     if: always()  # also after a failed or skipped job: it only reads the state files they wrote
     runs-on: ubuntu-latest
     steps:

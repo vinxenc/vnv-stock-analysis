@@ -10,7 +10,7 @@ from sqlalchemy import Engine
 from sqlmodel import Session
 
 from libs.constants import NO_DATA
-from libs.db.models import Price
+from libs.db.models import Price, ScreenHistory
 from scripts.vn_stock_get_history import SESSIONS, get_history, main
 
 END = dt.date(2026, 10, 23)
@@ -37,6 +37,25 @@ def test_get_history_keeps_the_last_sessions_in_ascending_date_order(engine: Eng
     assert rows[-1].date == END
     assert rows[0].date == END - dt.timedelta(days=SESSIONS - 1)  # the 5 oldest rows are cut
     assert [row.date for row in rows] == sorted(row.date for row in rows)
+
+
+def test_get_history_stops_at_the_given_session(engine: Engine) -> None:
+    store(engine, "AAA", 5)
+    with Session(engine) as session:
+        rows = get_history(session, "AAA", END - dt.timedelta(days=2))
+    assert [row.date for row in rows] == [END - dt.timedelta(days=4 - i) for i in range(3)]
+
+
+def test_main_ends_on_the_session_the_screen_recorded(tmp_path: Path, engine: Engine) -> None:
+    """The screen is a session behind (catch-up): the bars after it must not reach the analysis."""
+    csv, output = tmp_path / "liquid_symbols.csv", tmp_path / "vn_stock_history"
+    csv.write_text("code\nAAA\n", encoding="utf-8")
+    store(engine, "AAA", 5)
+    with Session(engine) as session:
+        session.add(ScreenHistory(date=END - dt.timedelta(days=1)))
+        session.commit()
+    assert main(csv, output, engine) == 0
+    assert [row["date"] for row in json.loads((output / "AAA.json").read_text(encoding="utf-8"))][-1] == "2026-10-22"
 
 
 def read(path: Path) -> list[dict]:
