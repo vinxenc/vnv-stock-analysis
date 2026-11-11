@@ -7,14 +7,14 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import Engine
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-from libs.constants import NO_DATA
-from libs.db.models import Price
+from libs.constants import NO_DATA, NOT_DUE
+from libs.db.models import Price, ScreenHistory
 from scripts import vn_stock_daily_price_store as price_store
-from scripts import vn_stock_screen
+from scripts import vn_stock_screen, vn_stock_screen_done
 from scripts.vn_stock_latest_price_retrieval import read_symbols
-from scripts.vn_stock_screen import MIN_TURNOVER, SESSIONS, main, screen
+from scripts.vn_stock_screen import MIN_TURNOVER, SESSION_FILE, SESSIONS, main, next_session, screen
 
 TODAY = dt.date(2026, 10, 23)  # a fixed day in the past, so main()'s default (the real today) never equals it
 
@@ -26,6 +26,18 @@ def store(engine: Engine, *rows: tuple[str, float, int, dt.date]) -> None:
             ohlc = dict(open=close, high=close, low=close, close=close)
             session.add(Price.model_validate(dict(symbol=symbol, date=date, source="A", volume=volume, **ohlc)))
         session.commit()
+
+
+def screened(engine: Engine, *days: dt.date) -> None:
+    """Put `days` in the screen history, as earlier runs would have."""
+    with Session(engine) as session:
+        session.add_all(ScreenHistory(date=day) for day in days)
+        session.commit()
+
+
+def history(engine: Engine) -> list[dt.date]:
+    with Session(engine) as session:
+        return sorted(row.date for row in session.exec(select(ScreenHistory)))
 
 
 def test_screen_keeps_exactly_the_threshold_and_drops_below_and_halted(engine: Engine) -> None:
@@ -130,18 +142,22 @@ def test_screen_drops_a_symbol_halted_today_even_with_a_high_average(engine: Eng
 def test_main_removes_an_old_shortlist_when_nobody_is_liquid(tmp_path: Path, engine: Engine) -> None:
     path = tmp_path / "liquid_symbols.csv"
     path.write_text("code\nOLD\n", encoding="utf-8")
+    screened(engine, YESTERDAY)
     store(engine, ("AAA", 1, 1, TODAY))
     assert main(path, engine, TODAY) == NO_DATA
     assert not path.exists()
+    assert history(engine) == [YESTERDAY]  # a failed screen leaves the session due: the next run retries it
 
 
 def test_main_removes_an_old_shortlist_when_the_session_is_stale(tmp_path: Path, engine: Engine) -> None:
     path = tmp_path / "liquid_symbols.csv"
     path.write_text("code\nOLD\n", encoding="utf-8")
-    store(engine, ("AAA", 10, 3_000_000, YESTERDAY))
+    screened(engine, YESTERDAY)
+    store(engine, ("AAA", 10, 3_000_000, YESTERDAY))  # no bar on TODAY yet
     with pytest.raises(RuntimeError, match="late or failed"):
         main(path, engine, TODAY)
     assert not path.exists()
+    assert history(engine) == [YESTERDAY]
 
 
 def test_main_defaults_to_today_in_vietnam(tmp_path: Path, engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -150,9 +166,91 @@ def test_main_defaults_to_today_in_vietnam(tmp_path: Path, engine: Engine, monke
         def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
             return dt.datetime(2026, 10, 23, 18, 0, tzinfo=dt.UTC).astimezone(tz)  # 25:00 in Vietnam: already the 24th
 
-    monkeypatch.setattr(vn_stock_screen, "dt", SimpleNamespace(datetime=FakeDatetime))
+    monkeypatch.setattr(vn_stock_screen, "dt", SimpleNamespace(datetime=FakeDatetime, timedelta=dt.timedelta))
     store(engine, ("AAA", 10, 3_000_000, dt.date(2026, 10, 24)))  # the Vietnam date, not the UTC one (23rd)
     assert main(tmp_path / "liquid_symbols.csv", engine) == 0
+
+
+def test_screen_a_past_session_ignores_the_newer_ones(engine: Engine) -> None:
+    """A run that is behind screens an older session: bars after it must not change its shortlist."""
+    later = TODAY + dt.timedelta(days=3)
+    store(
+        engine,
+        ("AAA", 10, 3_000_000, YESTERDAY),
+        ("BBB", 10, 3_000_000, YESTERDAY),
+        ("AAA", 10, 3_000_000, TODAY),  # liquid on TODAY ...
+        ("BBB", 1, 1, TODAY),  # ... and BBB is not
+        ("AAA", 10, 0, later),  # the later session flips both
+        ("BBB", 20_000, 10_000_000, later),
+    )
+    assert screen(engine, TODAY) == ["AAA"]
+    assert screen(engine, later) == ["BBB"]
+
+
+@pytest.mark.parametrize(
+    ("last", "expected"),
+    [
+        (dt.date(2026, 11, 5), dt.date(2026, 11, 6)),  # Thursday -> Friday
+        (dt.date(2026, 11, 6), dt.date(2026, 11, 9)),  # Friday -> Monday: the weekend is skipped
+        (dt.date(2026, 4, 29), dt.date(2026, 5, 4)),  # Wednesday -> Monday: 30/4 and 1/5 are holidays, then a weekend
+    ],
+)
+def test_next_session_skips_weekends_and_holidays(last: dt.date, expected: dt.date) -> None:
+    assert next_session(last) == expected
+
+
+def test_main_screens_the_day_after_the_history_and_leaves_the_recording_to_the_last_job(
+    tmp_path: Path, engine: Engine
+) -> None:
+    assert YESTERDAY.weekday() == 3 and TODAY.weekday() == 4  # Thursday, Friday
+    screened(engine, YESTERDAY)
+    store(engine, ("AAA", 10, 3_000_000, YESTERDAY), ("AAA", 10, 3_000_000, TODAY))
+    path = tmp_path / "liquid_symbols.csv"
+    assert main(path, engine, TODAY) == 0
+    assert read_symbols(path) == ["AAA"]
+    assert (tmp_path / SESSION_FILE).read_text(encoding="utf-8") == TODAY.isoformat()
+    assert history(engine) == [YESTERDAY]  # not yet: only vn_stock_screen_done records it
+    vn_stock_screen_done.main(tmp_path / SESSION_FILE, engine)
+    assert history(engine) == [YESTERDAY, TODAY]
+
+
+def test_main_has_nothing_to_do_when_the_next_session_is_after_today(tmp_path: Path, engine: Engine) -> None:
+    screened(engine, TODAY)  # a Friday: the next session is Monday
+    store(engine, ("AAA", 10, 3_000_000, TODAY))
+    path = tmp_path / "liquid_symbols.csv"
+    path.write_text("code\nOLD\n", encoding="utf-8")
+    for today in (
+        TODAY,
+        TODAY + dt.timedelta(days=1),
+        TODAY + dt.timedelta(days=2),
+    ):  # same day again, Saturday, Sunday
+        assert main(path, engine, today) == NOT_DUE
+        assert not path.exists()  # the old shortlist is gone, nothing new written
+    assert NOT_DUE == 5
+    assert history(engine) == [TODAY]
+
+
+def test_main_catches_up_one_session_at_a_time(tmp_path: Path, engine: Engine) -> None:
+    """The cron was dropped: Friday, Monday and Tuesday are due and all stored. Each run does the oldest one, with the
+    shortlist of that session only."""
+    monday, tuesday = TODAY + dt.timedelta(days=3), TODAY + dt.timedelta(days=4)
+    screened(engine, YESTERDAY)
+    store(
+        engine,
+        *[("A", 10, 3_000_000, day) for day in (YESTERDAY, TODAY, tuesday)],
+        ("A", 10, 0, monday),  # A is halted on Monday
+        ("B", 10, 1, YESTERDAY),
+        ("B", 10, 1, TODAY),
+        ("B", 10, 30_000_000, monday),  # B trades a lot on Monday and Tuesday
+        ("B", 10, 30_000_000, tuesday),
+    )
+    path = tmp_path / "liquid_symbols.csv"
+    for session_screened, expected in ((TODAY, ["A"]), (monday, ["B"]), (tuesday, ["A", "B"])):
+        assert main(path, engine, tuesday) == 0
+        assert read_symbols(path) == expected
+        vn_stock_screen_done.main(tmp_path / SESSION_FILE, engine)
+        assert history(engine)[-1] == session_screened
+    assert main(path, engine, tuesday) == NOT_DUE
 
 
 @pytest.fixture

@@ -4,7 +4,7 @@ Usage: uv run python -m scripts.vn_stock_analyze [history_dir] [output_json]
 Default: out/vn_stock_history (see vn_stock_get_history) -> out/vn_stock_analysis.json. No database, no network: it
 only reads the history files and data/hose_symbols.csv (the listing dates). The history comes from `prices` and is taken
 as correct: each file is ascending by date and ends on the session analysed (the screen already required a bar
-today), so nothing is re-checked here. The ranked table goes to $GITHUB_STEP_SUMMARY when it is set, else to the log.
+on it), so nothing is re-checked here. The ranked table goes to $GITHUB_STEP_SUMMARY when it is set, else to the log.
 Exit 0 = analysed, 4 = no history file (nothing to analyse), anything else = crash.
 """
 

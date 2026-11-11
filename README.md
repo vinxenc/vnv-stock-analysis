@@ -9,13 +9,14 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `libs/prices/` | `DNSE`, `VPS`, `VNDirect` classes. Each has `get_latest_price(symbol) -> Price`. `Price` is a pydantic model (symbol, source, date, open, high, low, close, volume; thousand VND). |
 | `libs/logger/` | `Logger` interface (`debug/info/warning/error`), `LogxideLogger` (adapter over [logxide](https://github.com/Indosaram/logxide), logs to stderr) and `GithubActionsLogger` (writes GitHub Actions annotations to stdout). |
 | `scripts/vn_stock_latest_price_retrieval.py` | Fetches the latest price of every symbol in `data/hose_symbols.csv` (DNSE → VPS → VNDirect, 1 retry per source, 1 s between symbols) and writes one JSON array. A symbol that fails everywhere is skipped. Exit 4 if none was fetched or fewer than 90% were (`MIN_COVERAGE`): no file is written, so a partial outage never reaches the database. |
-| `libs/db/` | `models.py`: `Price`, the `prices` table (primary key `symbol` + `date`), also the model the price sources return (`libs.prices.Price` reuses it). Create it with `Price.model_validate(data)`: SQLModel skips validation in `Price(**data)`. |
+| `libs/db/` | `models.py`: `Price`, the `prices` table (primary key `symbol` + `date`), also the model the price sources return (`libs.prices.Price` reuses it). Create it with `Price.model_validate(data)`: SQLModel skips validation in `Price(**data)`. `ScreenHistory`, the `vn_stock_screen_history` table (primary key `date`): the sessions `vn_stock_screen` has screened. |
 | `scripts/vn_stock_daily_price_store.py` | Reads the JSON above and upserts it into the `prices` table (`ON CONFLICT (symbol, date) DO UPDATE`, one transaction). Needs `$DATABASE_URL`. Exit 4 if the file holds no price. A repeated (symbol, date) in the file: the last row wins. 10 s connect and 60 s statement timeouts. |
-| `scripts/vn_stock_screen.py` | Reads `prices` and writes `out/liquid_symbols.csv` (a `code` column): the symbols that traded today (Vietnam time) and whose average turnover (`close × volume`) over their last 20 sessions is at least 20 billion VND (a symbol with fewer rows is averaged over the rows it has). Needs `$DATABASE_URL`. Crashes (exit 1) when the newest session in `prices` is not today, so a late or failed sync is never reported as fresh data; Also crashes when fewer than 90% of the previous session's symbols have a bar today (a partial sync would silently shrink the shortlist). Exit 4 if nobody is liquid enough. |
+| `scripts/vn_stock_screen.py` | Reads `prices` and writes `out/liquid_symbols.csv` (a `code` column): the symbols that traded on the session screened and whose average turnover (`close × volume`) over their last 20 sessions is at least 20 billion VND (a symbol with fewer rows is averaged over the rows it has). Needs `$DATABASE_URL`. The session screened is the first working day (weekends and public holidays skipped, `scripts/vn_holiday.py`) after the newest row of `vn_stock_screen_history`, not the wall-clock day, so a cron run that GitHub delays past midnight still screens the right session; it writes that session to `out/screen_session.txt` next to the CSV, and `vn_stock_screen_done` (the workflow's last job) records it in the history only after the analysis succeeded, so a run that fails anywhere leaves the session due. An empty history screens today. Exit 5 (`NOT_DUE`, nothing written) when that session is after today: a day off, or the session is already done. Crashes (exit 1) when `prices` has no bar on the session screened, so a late or failed sync is never reported as fresh data, and when fewer than 90% of the previous session's symbols have a bar on it (a partial sync would silently shrink the shortlist); the history stays as it was, so the next run retries. Exit 4 if nobody is liquid enough (a failure to look at: the session stays due). The history is a high-water mark: to redo the newest session, delete its row; deleting an older row changes nothing. |
+| `scripts/vn_stock_screen_done.py` | Records the session of `out/screen_session.txt` in `vn_stock_screen_history` (needs `$DATABASE_URL`); recording it twice is harmless. The last job of the analysis workflow runs it. |
 | `scripts/vn_stock_get_history.py` | For each symbol in `out/liquid_symbols.csv`, one query reads its last 260 sessions (`SESSIONS`) from `prices` and writes `out/vn_stock_history/<SYMBOL>.json` (a JSON array of `Price` rows, ascending date). The folder is emptied first and is the input of the next job. Needs `$DATABASE_URL`, only reads. A symbol with fewer rows is logged, never fatal; a symbol with no row gets no file. Exit 4 if no symbol has a row. |
 | `scripts/vn_stock_analyze.py` | Reads `out/vn_stock_history/*.json` (the previous job's artifact) and `data/hose_symbols.csv`, scores each symbol with the 24 indicators of `libs/analysis` (see `docs/plans/phase-1-sql-screens.md`, "Scoring design"), and writes `out/vn_stock_analysis.json` (the contract in `libs/analysis/models.py`, input of Phase 2) plus a ranked markdown table to `$GITHUB_STEP_SUMMARY` (the log when it is unset). No database, no network. Exit 4 when there is no history. |
-| `libs/constants.py` | Shared by the libs and scripts: `VN_TZ`, the exit code `NO_DATA` (4), `MIN_COVERAGE` (0.9). |
-| `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. `0001` creates `prices`, `0002` adds the index on `prices.date` (`max(date)` cannot use the primary key). A migration that already ran is never edited, not even reformatted (`ruff format` skips `0001`). |
+| `libs/constants.py` | Shared by the libs and scripts: `VN_TZ`, the exit codes `NO_DATA` (4) and `NOT_DUE` (5), `MIN_COVERAGE` (0.9). |
+| `migrations/` | Alembic migrations (`alembic.ini` at the root); the database comes from `$DATABASE_URL`. `0001` creates `prices`, `0002` adds the index on `prices.date` (`max(date)` cannot use the primary key), `0003` seeds the history up to 2026-11-06, `0004` seeds the session of 2026-11-09 that the sync missed, `0005` creates `vn_stock_screen_history` and inserts 2026-11-10 as its baseline. A migration that already ran is never edited, not even reformatted (`ruff format` skips `0001`). |
 | `docker-compose.yml` | Local Postgres 17 (user, password and database all `vnv`). |
 | `.github/workflows/cd.yml` | `CD`: on a push to `master` that changes `migrations/`, `data/seeds/`, this workflow or the `setup-env` action (or by hand), job `migrate` runs `alembic upgrade head` (schema and seed migrations alike). Needs the `DATABASE_URL` secret of the `production` environment. |
 | `data/hose_symbols.csv` | The 406 stocks listed on HOSE (as of 2026-10-23). |
@@ -24,7 +25,7 @@ Fetch the latest daily price of Vietnamese stocks from free public endpoints (no
 | `scripts/pipeline_state.py`, `scripts/notification.py`, `.github/actions/pipeline-state/` | Pipeline state files and the notification that reads them (see below). |
 | `.github/actions/setup-env/`, `.github/actions/check-holiday/` | Composite actions shared by all workflows: install uv with the cache settings and run `uv sync --locked` (see the uv cache rule below); run `scripts/vn_holiday.py` and output `holiday`. |
 | `.github/workflows/vn-stock-prices-sync.yml` | `VN Stock Prices Sync`: weekday cron (14:45 Vietnam time; not on the hour, scheduled runs on the hour are delayed most). Jobs: `start-analyze` → `install` → `is_holiday` → `retrieve_prices` → `vn_stock_daily_price_store` (downloads the JSON artifact and runs the store script with the `production` environment's `DATABASE_URL` secret), then `notification`. See "Pipeline state and notification" below. |
-| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (15:45 Vietnam time) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync` one hour earlier), never fetches. Jobs so far: `start-analyze` → `install` → `is_holiday` (a day off skips the later jobs) → `vn_stock_screen` (uploads the `vn-stock-screen` artifact, with the `production` environment's `DATABASE_URL` secret) → `vn_stock_get_history` (downloads that artifact, uploads `vn-stock-history`, same secret) → `vn_stock_analyze` (downloads the history, no secret, uploads `vn-stock-analysis` and writes the ranked table to the job summary), then `notification`. Design: `docs/plans/phase-1-sql-screens.md`. |
+| `.github/workflows/vn-stock-analysis.yml` | `VN Stock Analysis`: weekday cron (15:45 Vietnam time) plus manual run. It only reads `prices` (stored by `VN Stock Prices Sync` one hour earlier), never fetches. Jobs so far: `start-analyze` → `install` → `vn_stock_screen` (decides the session, see the script above: when the next session is after today it ends with a warning and the later jobs are skipped; otherwise it uploads the `vn-stock-screen` artifact, with the `production` environment's `DATABASE_URL` secret; there is no `is_holiday` job here, the screen skips a day off by itself) → `vn_stock_get_history` (downloads that artifact, uploads `vn-stock-history`, same secret) → `vn_stock_analyze` (downloads the history, no secret, uploads `vn-stock-analysis` and writes the ranked table to the job summary), then `vn_stock_screen_done` (records the session in the screen history, same secret), then `notification`. Design: `docs/plans/phase-1-sql-screens.md`. |
 
 The endpoints are undocumented and may change or block without notice.
 
@@ -90,7 +91,7 @@ Every job of `VN Stock Prices Sync` and `VN Stock Analysis` before `notification
 
 | Job result | `level` | `message` |
 |---|---|---|
-| success | `info` (`is_holiday` on a day off: `warning`) | the job's success message |
+| success | `info` (`is_holiday` on a day off, `vn_stock_screen` with nothing to screen yet: `warning`) | the job's success message |
 | failed | `error` | the job's failure message |
 | cancelled | `warning` | `<pipeline> was cancelled` |
 
@@ -110,7 +111,7 @@ docker compose up -d --wait   # start Postgres on 127.0.0.1:5432 (skip if it is 
 uv run pytest                 # unit tests + coverage gate
 ```
 
-- `tests/conftest.py` drops and recreates a separate `vnv_test` database at the start of every run, applies the real Alembic migrations to it (not `create_all`), and truncates `prices` before every test, so the tests run on the schema production gets and your dev database `vnv` is never touched. `tests/migrations/` also runs downgrade to nothing, upgrade, and `alembic check`.
+- `tests/conftest.py` drops and recreates a separate `vnv_test` database at the start of every run, applies the real Alembic migrations to it (not `create_all`), and truncates `prices` and `vn_stock_screen_history` before every test, so the tests run on the schema production gets and your dev database `vnv` is never touched. `tests/migrations/` also runs downgrade to nothing, upgrade, and `alembic check`.
 - No Postgres running: the DB tests fail with "Postgres is not reachable; run `docker compose up -d --wait`".
 - Different server: set `TEST_DATABASE_SERVER` to a `postgresql+psycopg://user:pass@host:port/postgres` URL (a role that can `CREATE DATABASE`).
 - The same applies to the pre-commit hook, which runs `pytest`: start Postgres first.
@@ -133,13 +134,13 @@ export DATABASE_URL=postgresql+psycopg://vnv:vnv@localhost:5432/vnv
 uv run alembic upgrade head
 ```
 
-`ENVIRONMENT=test` makes every seed migration do nothing (never set it on a database that must be seeded: the revision would be recorded as applied without its rows); `tests/conftest.py` sets it for the migrations the unit tests run, so only CI's `alembic upgrade head` on the `vnv` database (and your local one) loads the data. An applied migration never runs again, so the seed file is frozen: to load more history add a new revision with a new file, never edit this one. The daily sync keeps the table current from there.
+`ENVIRONMENT=test` makes every seed migration do nothing (never set it on a database that must be seeded: the revision would be recorded as applied without its rows); `tests/conftest.py` sets it for the migrations the unit tests run, so only CI's `alembic upgrade head` on the `vnv` database (and your local one) loads the data. An applied migration never runs again, so the seed file is frozen: to load more history add a new revision with a new file, never edit this one. The daily sync keeps the table current from there. Two later migrations follow the same rules: `0004_seed_prices_2026_11_09` loads `data/seeds/prices_2026_11_09.json.gz` (381 real bars of the session the sync missed on 2026-11-09, taken from that day's retrieval artifact), and `0005_create_vn_stock_screen_history` creates the screen history table and inserts 2026-11-10 (the unit tests empty the table in their `engine` fixture).
 
 The unit tests do not use the seed: `tests/data/prices_hpg_aam.json` holds real history of two stocks (HPG, very liquid; AAM, almost untraded), and the `before_test` fixture of `test_screen` stores it in the empty test database before the screen runs.
 
 #### Run the analysis pipeline locally
 
-`vn_stock_screen` fails unless the newest session in `prices` is today (VN), and the seed stops at its build date. So on a trading day, run the real sync first (it fetches today's bar of every symbol, about 20 min) and then the analysis jobs:
+`vn_stock_screen` screens the working day after the newest row of `vn_stock_screen_history` (the seed migration `0005` inserts 2026-11-10, so a new database screens 2026-11-11 first) and fails unless `prices` has that day's bars. So run the real sync on a trading day first (it fetches the latest bar of every symbol, about 20 min) and then the analysis jobs:
 
 ```bash
 docker compose up -d --wait
@@ -150,7 +151,7 @@ uv run python -m scripts.vn_stock_daily_price_store          # upsert them into 
 uv run python -m scripts.vn_stock_screen && uv run python -m scripts.vn_stock_get_history
 ```
 
-Without a real bar for today (weekend, holiday, before the close, or no time for the sync), copy the newest session to today instead (no code switch, production is unchanged):
+Without a real bar for the session due (weekend, holiday, before the close, or no time for the sync), copy the newest session to it instead (no code switch, production is unchanged; replace `CURRENT_DATE` with the session the screen names in its error, if it is not today):
 
 ```bash
 docker compose exec -T postgres psql -U vnv -d vnv -c "INSERT INTO prices (symbol, date, source, unit, open, high, low, close, volume) SELECT symbol, CURRENT_DATE, source, unit, open, high, low, close, volume FROM prices WHERE date = (SELECT max(date) FROM prices) ON CONFLICT (symbol, date) DO NOTHING"
@@ -204,9 +205,9 @@ tests/libs/analysis/   test_models.py (example JSON in tests/data/analysis_examp
 libs/logger/   base.py (Logger), logxide.py (LogxideLogger, stderr), github_actions.py (GithubActionsLogger, workflow commands on stdout)
 tests/libs/logger/   test_logxide.py, test_github_actions.py
 tests/migrations/   test_migrations.py (downgrade, upgrade, alembic check)
-scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, vn_stock_screen.py, vn_stock_get_history.py, vn_stock_analyze.py, pipeline_state.py, notification.py
+scripts/   vn_holiday.py, vn_stock_latest_price_retrieval.py, vn_stock_daily_price_store.py, vn_stock_screen.py, vn_stock_screen_done.py, vn_stock_get_history.py, vn_stock_analyze.py, pipeline_state.py, notification.py
 tests/   conftest.py (Postgres fixtures: `pg_url`, `engine`), data/prices_hpg_aam.json (real DNSE history of HPG and AAM, 2026-09-15..2026-10-29, test data of the screen)
-tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_vn_stock_screen.py, test_vn_stock_get_history.py, test_vn_stock_analyze.py, test_pipeline_state.py, test_notification.py
+tests/scripts/   test_vn_holiday.py, test_vn_stock_latest_price_retrieval.py, test_vn_stock_daily_price_store.py, test_vn_stock_screen.py, test_vn_stock_screen_done.py, test_vn_stock_get_history.py, test_vn_stock_analyze.py, test_pipeline_state.py, test_notification.py
 ```
 
 Every source raises `PriceNotFoundError` for an invalid or unknown ticker; other failures (network, HTTP 5xx) propagate as they are. `Price` rejects non-positive prices, and a negative volume.
