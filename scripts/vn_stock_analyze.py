@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, delete
 from sqlalchemy.dialects.postgresql import insert
 
 from libs.analysis import scoring, summary
@@ -45,7 +45,8 @@ def read_listed_dates(path: Path = SYMBOLS_CSV) -> dict[str, dt.date]:
 
 def store(report: AnalysisReport, engine: Engine) -> None:
     """Upsert one row per symbol with a score above 0, keyed on (date, timeframe, symbol): a rerun overwrites the
-    symbols it scores again. Insufficient data (null) and 0 points are not stored; the JSON and summary keep them."""
+    symbols it scores again. Insufficient data (null) and 0 points are not stored (the JSON and summary keep them), and
+    a rerun that drops a symbol to null or 0 deletes its older row. Symbols absent from the report keep theirs."""
     meta = scoring.metadata()
     rows = [
         {
@@ -63,13 +64,18 @@ def store(report: AnalysisReport, engine: Engine) -> None:
         for result in report.symbols
         if result.score  # None (insufficient data) or 0
     ]
-    if not rows:
-        return
+    unscored = [result.symbol for result in report.symbols if not result.score]
     statement = insert(Ranking)
     keys = Ranking.__table__.primary_key.columns
     update = {column.key: column for column in statement.excluded if column.key not in keys}
     with engine.begin() as connection:
-        connection.execute(statement.on_conflict_do_update(index_elements=keys, set_=update), rows)
+        connection.execute(
+            delete(Ranking).where(
+                Ranking.date == report.as_of, Ranking.timeframe == report.timeframe, Ranking.symbol.in_(unscored)
+            )
+        )
+        if rows:
+            connection.execute(statement.on_conflict_do_update(index_elements=keys, set_=update), rows)
 
 
 def main(

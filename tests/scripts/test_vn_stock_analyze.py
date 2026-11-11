@@ -74,6 +74,18 @@ def test_store_upserts_on_date_timeframe_and_symbol(engine: Engine) -> None:
     ]
 
 
+def test_a_rerun_that_drops_a_score_to_null_or_0_deletes_its_row(engine: Engine) -> None:
+    """HPG 70 -> 0 and AAM 60 -> null on a rerun: their rows go, even when nothing is left to upsert. VCB is absent from
+    the rerun and keeps its row; the weekly row of the same symbol is untouched."""
+    store(report(result("HPG", 70), result("AAM", 60), result("VCB", 50)), engine)
+    store(report(result("HPG", 40), timeframe=Timeframe.WEEKLY), engine)
+    store(report(result("HPG", 0), result("AAM", None)), engine)
+    assert [(row.timeframe, row.symbol, row.score) for row in rankings(engine)] == [
+        (Timeframe.DAILY, "VCB", 50),
+        (Timeframe.WEEKLY, "HPG", 40),
+    ]
+
+
 def write_history(directory: Path, symbol: str, count: int) -> None:
     rows = [row.model_dump(mode="json") for row in make_rows(symbol, count)]
     (directory / f"{symbol}.json").write_text(json.dumps(rows), encoding="utf-8")
