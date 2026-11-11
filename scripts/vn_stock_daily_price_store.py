@@ -1,4 +1,4 @@
-"""Upsert the prices of a JSON array (see vn_stock_latest_price_retrieval) into the `prices` table.
+"""Upsert the prices of a JSON array (see vn_stock_latest_price_retrieval) into the `vn_stock_prices` table.
 
 Usage: DATABASE_URL=... uv run python -m scripts.vn_stock_daily_price_store [input_json]
 Default: out/vn_stock_latest_prices.json

@@ -1,4 +1,4 @@
-"""Read the last SESSIONS sessions of every shortlisted symbol from `prices`, one JSON file per symbol.
+"""Read the last SESSIONS sessions of every shortlisted symbol from `vn_stock_prices`, one JSON file per symbol.
 
 Usage: DATABASE_URL=... uv run python -m scripts.vn_stock_get_history [symbols_csv] [output_dir]
 Default: out/liquid_symbols.csv (see vn_stock_screen) -> out/vn_stock_history/<SYMBOL>.json

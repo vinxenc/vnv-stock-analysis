@@ -15,7 +15,7 @@ class Price(SQLModel, table=True):
     `Price(**data)`.
     """
 
-    __tablename__ = "prices"
+    __tablename__ = "vn_stock_prices"
     model_config = ConfigDict(allow_inf_nan=False)
 
     symbol: str = Field(primary_key=True)
@@ -50,7 +50,7 @@ class Ranking(SQLModel, table=True):
     # Postgres enum `timeframe` of the values ("daily"); adding one later needs `ALTER TYPE ... ADD VALUE`
     timeframe: Timeframe = Field(primary_key=True, sa_type=Enum(*Timeframe, name="timeframe"))
     symbol: str = Field(primary_key=True)
-    score: float | None  # None = insufficient data
+    score: float  # above 0: insufficient data (null) and 0 points are not stored
     coverage: float
     turnover: float  # average close × volume over 20 sessions, thousand VND
     themes: dict[str, float] = Field(sa_type=JSONB)

@@ -12,3 +12,7 @@ When you start work in a new worktree, and whenever the database refuses connect
 4. If the task needs today's prices, run the sync: `vn_stock_latest_price_retrieval` then `vn_stock_daily_price_store` (see README, "Run the analysis pipeline locally").
 
 Use `docker compose exec -T postgres psql -U vnv -d vnv` for ad-hoc SQL; do not wrap SQL in throwaway Python.
+
+## Table names: `vn_stock_<thing>`
+
+Every table is named `vn_stock_` plus a snake_case noun: `vn_stock_prices`, `vn_stock_rankings`, `vn_stock_screen_history`. A new table follows it from its first migration. Renaming one is a new migration (`op.rename_table`, plus `ALTER INDEX ... RENAME` for its `<table>_pkey` and every `ix_<table>_<column>` index, since `alembic check` compares index names), never an edit of an applied migration, which keeps the old name. Migrations name tables as strings (`sa.table("prices", ...)`), never through the models, so an old revision still finds the table under the name it had then.

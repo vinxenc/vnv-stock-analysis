@@ -21,11 +21,11 @@ def test_migrations_roundtrip_and_match_the_models(alembic_config: Config) -> No
     command.check(alembic_config)
     assert set(inspect(engine).get_table_names()) == {
         "alembic_version",
-        "prices",
+        "vn_stock_prices",
         "vn_stock_screen_history",
         "vn_stock_rankings",
     }
-    assert {index["name"] for index in inspect(engine).get_indexes("prices")} == {"ix_prices_date"}
+    assert {index["name"] for index in inspect(engine).get_indexes("vn_stock_prices")} == {"ix_vn_stock_prices_date"}
     # `alembic check` does not compare enum values: a new Timeframe member needs its own `ALTER TYPE` migration
     with engine.connect() as connection:
         assert connection.execute(text("SELECT enum_range(NULL::timeframe)::text[]")).scalar() == list(Timeframe)

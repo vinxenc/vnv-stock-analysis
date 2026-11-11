@@ -8,9 +8,9 @@ The session screened is the first working day (weekends and public holidays skip
 screens the right session. When that session is after today there is nothing to do yet. An empty history screens today.
 The session screened goes to `screen_session.txt` next to the CSV; the history only gets it from `vn_stock_screen_done`,
 the last job of the workflow, so a run that fails after the screen leaves the session due and the next run redoes it.
-Fails (crash, exit 1) unless the session screened has bars in `prices`: the sync has not finished or failed, and old
-data must not be reported as fresh. Also fails when fewer than MIN_COVERAGE of the previous session's symbols have a
-bar on it: a partial sync would silently shrink the shortlist.
+Fails (crash, exit 1) unless the session screened has bars in `vn_stock_prices`: the sync has not finished or failed,
+and old data must not be reported as fresh. Also fails when fewer than MIN_COVERAGE of the previous session's symbols
+have a bar on it: a partial sync would silently shrink the shortlist.
 Exit 0 = shortlist and session written, 4 = nobody is liquid enough (nothing written), 5 = nothing to screen yet
 (nothing written), anything else = crash.
 """
@@ -49,7 +49,8 @@ def screen(engine: Engine, today: dt.date, log: Logger = logger) -> list[str]:
 
     Sorted. A symbol with no row today, or a halted one (volume 0 today), is dropped whatever its average. A halted
     earlier day counts as 0 turnover. A symbol with fewer than SESSIONS rows is averaged over the rows it has.
-    ponytail: until `prices` is backfilled a new listing can pass on a single big day; require SESSIONS rows then.
+    ponytail: until `vn_stock_prices` is backfilled a new listing can pass on a single big day; require SESSIONS rows
+    then.
     """
     recent = (
         select(
