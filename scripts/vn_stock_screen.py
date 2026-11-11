@@ -5,13 +5,14 @@ Usage: DATABASE_URL=... uv run python -m scripts.vn_stock_screen [output_csv]
 Default: out/liquid_symbols.csv (a `code` column, same shape as data/hose_symbols.csv)
 The session screened is the first working day (weekends and public holidays skipped) after the newest row of
 `vn_stock_screen_history`, not the wall-clock day: a cron run that GitHub delays past midnight (Vietnam time) still
-screens the right session. When that session is after today there is nothing to do yet. A screen that succeeds adds its
-session to the history, so the next run moves on; an empty history screens today.
+screens the right session. When that session is after today there is nothing to do yet. An empty history screens today.
+The session screened goes to `screen_session.txt` next to the CSV; the history only gets it from `vn_stock_screen_done`,
+the last job of the workflow, so a run that fails after the screen leaves the session due and the next run redoes it.
 Fails (crash, exit 1) unless the session screened has bars in `prices`: the sync has not finished or failed, and old
 data must not be reported as fresh. Also fails when fewer than MIN_COVERAGE of the previous session's symbols have a
 bar on it: a partial sync would silently shrink the shortlist.
-Exit 0 = shortlist written, 4 = nobody is liquid enough (nothing written), 5 = nothing to screen yet (nothing
-written), anything else = crash.
+Exit 0 = shortlist and session written, 4 = nobody is liquid enough (nothing written), 5 = nothing to screen yet
+(nothing written), anything else = crash.
 """
 
 import csv
@@ -29,6 +30,7 @@ from libs.logger import Logger, LogxideLogger
 from scripts.vn_holiday import off_reason
 
 MIN_TURNOVER = 20_000_000  # thousand VND (prices are in thousand VND) = 20 billion VND per session
+SESSION_FILE = "screen_session.txt"  # the ISO date screened, next to the shortlist
 SESSIONS = 20  # rows, not calendar days (holidays); a symbol with fewer rows is averaged over the rows it has
 logger = LogxideLogger("vn_stock_screen")
 
@@ -71,7 +73,7 @@ def screen(engine: Engine, today: dt.date, log: Logger = logger) -> list[str]:
         )
         latest = newest[0][0] if newest else None
         if latest != today:
-            raise RuntimeError(f"newest session in prices is {latest}, expected {today}: the sync is late or failed")
+            raise RuntimeError(f"no bar on {today} (newest session up to it: {latest}): the sync is late or failed")
         if len(newest) > 1:  # none on the very first day
             previous, before = newest[1]
             both = session.exec(  # symbols with a bar on both days: a new listing cannot make up for a missing symbol
@@ -104,7 +106,9 @@ def main(
     today: dt.date | None = None,
     log: Logger = logger,
 ) -> int:
+    session_file = output_csv.with_name(SESSION_FILE)
     output_csv.unlink(missing_ok=True)  # an older shortlist must not pass for today's, whatever happens next
+    session_file.unlink(missing_ok=True)
     engine = engine or connect()
     today = today or dt.datetime.now(VN_TZ).date()
     with Session(engine) as session:
@@ -122,9 +126,7 @@ def main(
         writer = csv.writer(file)
         writer.writerow(["code"])
         writer.writerows([code] for code in liquid)
-    with Session(engine) as session:  # last: a failed screen leaves the session due, the next run retries it
-        session.add(ScreenHistory(date=day))
-        session.commit()
+    session_file.write_text(day.isoformat(), encoding="utf-8")
     return 0
 
 

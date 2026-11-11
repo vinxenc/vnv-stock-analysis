@@ -10,10 +10,19 @@ from sqlalchemy import Engine
 from sqlmodel import Session
 
 from libs.constants import NO_DATA
-from libs.db.models import Price, ScreenHistory
+from libs.db.models import Price
 from scripts.vn_stock_get_history import SESSIONS, get_history, main
+from scripts.vn_stock_screen import SESSION_FILE
 
 END = dt.date(2026, 10, 23)
+
+
+def shortlist(tmp_path: Path, codes: str, session: dt.date = END) -> Path:
+    """The CSV of the screen, and the session file it writes next to it."""
+    csv = tmp_path / "liquid_symbols.csv"
+    csv.write_text(f"code\n{codes}", encoding="utf-8")
+    (tmp_path / SESSION_FILE).write_text(session.isoformat(), encoding="utf-8")
+    return csv
 
 
 def store(engine: Engine, symbol: str, count: int, end: dt.date = END) -> None:
@@ -31,7 +40,7 @@ def test_get_history_keeps_the_last_sessions_in_ascending_date_order(engine: Eng
     store(engine, "AAA", SESSIONS + 5)
     store(engine, "BBB", 3)  # another symbol: never mixed in
     with Session(engine) as session:
-        rows = get_history(session, "AAA")
+        rows = get_history(session, "AAA", END)
     assert len(rows) == SESSIONS
     assert {row.symbol for row in rows} == {"AAA"}
     assert rows[-1].date == END
@@ -46,14 +55,10 @@ def test_get_history_stops_at_the_given_session(engine: Engine) -> None:
     assert [row.date for row in rows] == [END - dt.timedelta(days=4 - i) for i in range(3)]
 
 
-def test_main_ends_on_the_session_the_screen_recorded(tmp_path: Path, engine: Engine) -> None:
+def test_main_ends_on_the_session_of_the_shortlist(tmp_path: Path, engine: Engine) -> None:
     """The screen is a session behind (catch-up): the bars after it must not reach the analysis."""
-    csv, output = tmp_path / "liquid_symbols.csv", tmp_path / "vn_stock_history"
-    csv.write_text("code\nAAA\n", encoding="utf-8")
+    csv, output = shortlist(tmp_path, "AAA\n", END - dt.timedelta(days=1)), tmp_path / "vn_stock_history"
     store(engine, "AAA", 5)
-    with Session(engine) as session:
-        session.add(ScreenHistory(date=END - dt.timedelta(days=1)))
-        session.commit()
     assert main(csv, output, engine) == 0
     assert [row["date"] for row in json.loads((output / "AAA.json").read_text(encoding="utf-8"))][-1] == "2026-10-22"
 
@@ -63,8 +68,7 @@ def read(path: Path) -> list[dict]:
 
 
 def test_main_writes_one_json_per_symbol_and_logs_the_short_ones(tmp_path: Path, engine: Engine) -> None:
-    csv, output = tmp_path / "liquid_symbols.csv", tmp_path / "out" / "vn_stock_history"
-    csv.write_text("code\nAAA\nBBB\nZZZ\n", encoding="utf-8")
+    csv, output = shortlist(tmp_path, "AAA\nBBB\nZZZ\n"), tmp_path / "out" / "vn_stock_history"
     store(engine, "AAA", SESSIONS)
     store(engine, "BBB", 2)
     log = MagicMock()
@@ -81,8 +85,7 @@ def test_main_writes_one_json_per_symbol_and_logs_the_short_ones(tmp_path: Path,
 
 
 def test_main_empties_the_output_directory_first(tmp_path: Path, engine: Engine) -> None:
-    csv, output = tmp_path / "liquid_symbols.csv", tmp_path / "vn_stock_history"
-    csv.write_text("code\nAAA\n", encoding="utf-8")
+    csv, output = shortlist(tmp_path, "AAA\n"), tmp_path / "vn_stock_history"
     output.mkdir()
     (output / "OLD.json").write_text("[]", encoding="utf-8")
     store(engine, "AAA", 1)
@@ -91,8 +94,7 @@ def test_main_empties_the_output_directory_first(tmp_path: Path, engine: Engine)
 
 
 def test_main_removes_an_old_history_when_nothing_is_found(tmp_path: Path, engine: Engine) -> None:
-    csv, output = tmp_path / "liquid_symbols.csv", tmp_path / "vn_stock_history"
-    csv.write_text("code\nAAA\n", encoding="utf-8")
+    csv, output = shortlist(tmp_path, "AAA\n"), tmp_path / "vn_stock_history"
     output.mkdir()
     (output / "OLD.json").write_text("[]", encoding="utf-8")
     assert main(csv, output, engine) == NO_DATA
@@ -102,8 +104,7 @@ def test_main_removes_an_old_history_when_nothing_is_found(tmp_path: Path, engin
 
 def test_run_as_script(tmp_path: Path, engine: Engine, pg_url: str) -> None:
     """The real entry point: argv and DATABASE_URL."""
-    csv, output = tmp_path / "liquid_symbols.csv", tmp_path / "vn_stock_history"
-    csv.write_text("code\nAAA\n", encoding="utf-8")
+    csv, output = shortlist(tmp_path, "AAA\n"), tmp_path / "vn_stock_history"
     store(engine, "AAA", 1)
     env = {**os.environ, "DATABASE_URL": pg_url.replace("postgresql+psycopg://", "postgres://")}
     cmd = [sys.executable, "-m", "scripts.vn_stock_get_history", str(csv), str(output)]

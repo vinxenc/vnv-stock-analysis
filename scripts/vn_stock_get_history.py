@@ -3,7 +3,7 @@
 Usage: DATABASE_URL=... uv run python -m scripts.vn_stock_get_history [symbols_csv] [output_dir]
 Default: out/liquid_symbols.csv (see vn_stock_screen) -> out/vn_stock_history/<SYMBOL>.json
 Each file is a JSON array of `Price` rows in ascending date order (the analysis reads them as time series), ending on
-the newest session in `vn_stock_screen_history` (the one the screen just did; later bars, if any, are left out). A
+the session in `screen_session.txt` next to the shortlist (the one the screen did; later bars, if any, are left out). A
 symbol with fewer than SESSIONS rows is logged, never fatal: the analysis decides what to skip. A symbol with no row
 gets no file. This job only reads the database. The output directory is emptied first, so it never holds an older run.
 Exit 0 = at least one file written, 4 = no row found for any symbol (nothing written), anything else = crash.
@@ -15,24 +15,23 @@ import shutil
 import sys
 from pathlib import Path
 
-from sqlalchemy import Engine, func
+from sqlalchemy import Engine
 from sqlmodel import Session, select
 
 from libs.constants import NO_DATA
 from libs.db import connect
-from libs.db.models import Price, ScreenHistory
+from libs.db.models import Price
 from libs.logger import Logger, LogxideLogger
 from scripts.vn_stock_latest_price_retrieval import read_symbols
+from scripts.vn_stock_screen import SESSION_FILE
 
 SESSIONS = 260  # rows, not calendar days (holidays); the longest lookback of the scoring table is 250 (#17) + a buffer
 logger = LogxideLogger("vn_stock_get_history")
 
 
-def get_history(session: Session, symbol: str, until: dt.date | None = None) -> list[Price]:
-    """The last SESSIONS rows of `symbol` up to `until` (no bound when None), in ascending date order."""
-    query = select(Price).where(Price.symbol == symbol)
-    if until:
-        query = query.where(Price.date <= until)
+def get_history(session: Session, symbol: str, until: dt.date) -> list[Price]:
+    """The last SESSIONS rows of `symbol` up to `until`, in ascending date order."""
+    query = select(Price).where(Price.symbol == symbol, Price.date <= until)
     return list(reversed(session.exec(query.order_by(Price.date.desc()).limit(SESSIONS)).all()))
 
 
@@ -44,9 +43,9 @@ def main(
 ) -> int:
     shutil.rmtree(output_dir, ignore_errors=True)  # an older history must not pass for today's, whatever happens next
     symbols = read_symbols(symbols_csv)
+    until = dt.date.fromisoformat(symbols_csv.with_name(SESSION_FILE).read_text(encoding="utf-8").strip())
     written, short = 0, []
     with Session(engine or connect()) as session:  # one connection for the whole job (NullPool: one per checkout)
-        until = session.exec(select(func.max(ScreenHistory.date))).one()  # None on an empty history: no bound
         for symbol in symbols:
             rows = get_history(session, symbol, until)
             if len(rows) < SESSIONS:
