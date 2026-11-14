@@ -1,6 +1,6 @@
 # Phase 3 — Logistic regression on the screening indicators
 
-Status: **draft, not started** (2026-11-14). Research first (`research/`), pipeline only if it wins. Related: [phase-1-sql-screens.md](phase-1-sql-screens.md) ("Scoring design", whose weights and thresholds are placeholders), [phase-5-foundation-model-forecasts.md](phase-5-foundation-model-forecasts.md) (why the zero-shot forecasters were set aside), [phase-4-rd-agent.md](phase-4-rd-agent.md).
+Status: **draft, not started** (2026-11-14). Research first (`research/`), pipeline only if it wins. Related: [phase-1-sql-screens.md](phase-1-sql-screens.md) ("Scoring design", whose weights and thresholds are placeholders), [phase-4-foundation-model-forecasts.md](phase-4-foundation-model-forecasts.md) (why the zero-shot forecasters were set aside), [phase-5-rd-agent.md](phase-5-rd-agent.md).
 
 ## Goal
 

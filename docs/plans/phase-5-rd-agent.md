@@ -1,6 +1,6 @@
-# Phase 4 — RD-Agent: LLM-driven factor search
+# Phase 5 — RD-Agent: LLM-driven factor search
 
-Status: **parked** (2026-11-14). Not to start before its prerequisites (below). Related: [phase-3-logistic-regression-score.md](phase-3-logistic-regression-score.md) (the baseline RD-Agent must beat), [phase-5-foundation-model-forecasts.md](phase-5-foundation-model-forecasts.md).
+Status: **parked** (2026-11-14). Not to start before its prerequisites (below). Related: [phase-3-logistic-regression-score.md](phase-3-logistic-regression-score.md) (the baseline RD-Agent must beat), [phase-4-foundation-model-forecasts.md](phase-4-foundation-model-forecasts.md).
 
 ## Goal
 
