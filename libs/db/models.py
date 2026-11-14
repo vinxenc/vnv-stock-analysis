@@ -67,9 +67,10 @@ def _one_of(column: str, values: type[Decider] | type[Verdict]) -> str:
 
 class DecisionRecord(SQLModel, table=True):
     """One answer of one decider about one symbol of one session (buy or skip, with the probability of buy), and
-    its outcome five sessions later. A decider's rows for a session are replaced by its latest run. `decider` and
-    `decision` are text with a CHECK on `Decider` and `Verdict`, `probability` has one between 0 and 1 (`CLAUDE.md`:
-    `alembic check` does not compare CHECK constraints, so a test tries a bad value)."""
+    its outcome five sessions later. A model's rows for a session are replaced by its latest run. `decider` (the kind
+    of model) and `decision` are text with a CHECK on `Decider` and `Verdict`, `probability` has one between 0 and 1
+    (`CLAUDE.md`: `alembic check` does not compare CHECK constraints, so a test tries a bad value). `model_name` says
+    which model answered and has no CHECK, so a new model of a known kind needs no migration."""
 
     __tablename__ = "vn_stock_decisions"
     __table_args__ = (
@@ -80,12 +81,14 @@ class DecisionRecord(SQLModel, table=True):
 
     date: dt.date = Field(primary_key=True)  # the session decided (`t`)
     symbol: str = Field(primary_key=True)
-    decider: str = Field(primary_key=True, sa_type=Text)
+    model_name: str = Field(
+        primary_key=True
+    )  # "provider/model", e.g. "anthropic/claude-opus-5-5"; determines `decider`
+    decider: str = Field(sa_type=Text)
     decision: str = Field(sa_type=Text)
     probability: float  # of buy
-    reason: str | None = Field(default=None, sa_type=Text)  # Claude only
-    model_version: str
-    input: dict = Field(sa_type=JSONB)  # the exact input, so any answer can be re-read
+    reason: str | None = Field(default=None, sa_type=Text)  # LLM only
+    input: dict = Field(sa_type=JSONB)  # the exact input (with the prompt version), so any answer can be re-read
     # set by Postgres, never by the code; the ORM leaves a None out of the INSERT
     created_at: dt.datetime | None = Field(
         default=None, nullable=False, sa_type=DateTime(timezone=True), sa_column_kwargs={"server_default": func.now()}

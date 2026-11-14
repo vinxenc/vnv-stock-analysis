@@ -98,7 +98,7 @@ Pick one:
   - [ ] Daily: `vn_stock_analyze` multiplies today's raw values by the latest coefficients (logistic), or, for LightGBM, loads the stored booster text, predicts on today's raw values and applies the stored calibration map; the probability is stored next to the score in `vn_stock_rankings` and shown in the job summary.
   - [ ] scikit-learn only where needed (the daily logistic part is a dot product and needs none; LightGBM needs `lightgbm` in the job that scores, in its own dependency group).
   - [ ] Tests with the 95% gate; README updated.
-- [ ] **(c) A fourth decider in Phase 2**, only if the `hit_3pct_5` model passed its own go / no-go: that model's probability of `hit_3pct_5` above a threshold = buy, stored in `vn_stock_decisions` next to Claude, Jev and TabICL and scored the same way.
+- [ ] **(c) A `tabular` model in Phase 2** (a new `model_name`, no migration), only if the `hit_3pct_5` model passed its own go / no-go: that model's probability of `hit_3pct_5` above a threshold = buy, stored in `vn_stock_decisions` next to Claude, Jev and TabICL and scored the same way.
 - [ ] Forward check: the first 3 months of live probabilities are evaluated with the same metrics before anyone relies on them.
 
 ## Step 6. Later, only if step 3 works
