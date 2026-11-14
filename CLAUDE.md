@@ -1,5 +1,9 @@
 # Project rules
 
+## Plan review debt: check it first
+
+`docs/plans/review-debt.md` lists the open findings of the 2026-11-14 plan review. At the start of any session that touches `docs/plans/` or implements a step of Phase 2 or Phase 3, read it before anything else, tell the user how many items are still open and which ones touch the work at hand, and fix those first (plan, then code). Tick an item with its commit when it is done; delete the file when every item is ticked, and this section with it.
+
 ## Research goes to the `researcher` agent
 
 The main session does not search on its own. Every lookup goes to the `researcher` subagent (`.claude/agents/researcher.md`, Haiku 5.5, read-only), which returns a short sourced summary:

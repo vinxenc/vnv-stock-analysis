@@ -1,6 +1,6 @@
 # Phase 2 — Buy / skip decision per symbol (Claude, Jev, TabICL) and a Telegram channel
 
-Status: **draft, not started** (2026-11-14; first draft 2026-10-28 was a market summary, replaced). Comes after [phase-1-sql-screens.md](phase-1-sql-screens.md), which has run green on GitHub since 2026-11-11. Work through the checklist below in order: one step = one PR. The TabICL step needs the feature panel of [phase-3-logistic-regression-score.md](phase-3-logistic-regression-score.md) step 1.
+Status: **draft, not started** (2026-11-14; first draft 2026-10-28 was a market summary, replaced). Comes after [phase-1-sql-screens.md](phase-1-sql-screens.md), which has run green on GitHub since 2026-11-11. Work through the checklist below in order: one step = one PR. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** The TabICL step needs the feature panel of [phase-3-logistic-regression-score.md](phase-3-logistic-regression-score.md) step 1.
 
 ## Goal
 
