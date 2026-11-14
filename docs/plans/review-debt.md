@@ -35,7 +35,7 @@ Verified by the main session: items 10 (`setup-env` and the CI audit) and 12 (21
 - [ ] **13. Step 5b contradicts per-session standardisation** (`phase-3` Decisions vs step 5b). Inputs are z-scored per session, so there are no "standardisation parameters" to store, and daily scoring needs that day's whole shortlist. Fix: store coefficients only; z-score across the day's shortlist inside `vn_stock_analyze`.
 - [ ] **14. The look-ahead check cannot match exactly** (`phase-3` step 1 vs `SESSIONS = 260` in `scripts/vn_stock_get_history.py`). RSI and PPO are recursive, so "all bars up to t" differs slightly from the live run's last 260 rows; the check only covers sessions since 2026-11-11. Fix: `build_panel` uses the same last-260 window and compares with a tolerance.
 - [ ] **15. Cuts and stale claims:**
-  - [ ] `phase-2` step 1: the `decider` Postgres enum needs `ALTER TYPE` for the fourth decider already planned; a text column with a CHECK is enough.
+  - [x] `phase-2` step 1: the `decider` Postgres enum needs `ALTER TYPE` for the fourth decider already planned; a text column with a CHECK is enough. Done in the plan: `af34bf6`.
   - [ ] `phase-2` step 7: the 4096-character split is unreachable with 20 one-line symbols; drop it.
   - [ ] `phase-2` Decisions: the ranked table and the `vn-stock-analysis` artifact are already public (`vn-stock-analysis.yml`), so only buy / skip is hidden; say so.
   - [ ] `phase-2` step 8: four new secrets, not five (`DATABASE_URL` exists).
