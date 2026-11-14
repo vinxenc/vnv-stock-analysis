@@ -4,7 +4,7 @@ Status: **draft, not started** (2026-11-14). Research first (`research/`), pipel
 
 ## Goal
 
-Learn from the data which of the 24 indicators of `libs/analysis` actually tell a stock that will beat its peers over the next 5 sessions from one that will not, instead of the hand-set weights of `libs/analysis/scoring.py`. Output: a probability P(beat the median over 5 sessions) per symbol and session, used to **rank and screen**, never as a buy/sell order (same rule as Phase 2: no recommendations).
+Learn from the data which of the 24 indicators of `libs/analysis` actually tell a stock that will beat its peers over the next 5 sessions from one that will not, instead of the hand-set weights of `libs/analysis/scoring.py`. Output: a probability P(beat the median over 5 sessions) per symbol and session, used to **rank and screen**, never as a buy/sell order by itself (the buy / skip call is Phase 2's, which can take this probability as an input).
 
 Two possible outcomes, both useful:
 - The model beats the 0–100 score out of sample → it can be added to the pipeline (step 5).
