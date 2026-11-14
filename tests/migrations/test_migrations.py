@@ -24,6 +24,7 @@ def test_migrations_roundtrip_and_match_the_models(alembic_config: Config) -> No
         "vn_stock_prices",
         "vn_stock_screen_history",
         "vn_stock_rankings",
+        "vn_stock_decisions",
     }
     assert {index["name"] for index in inspect(engine).get_indexes("vn_stock_prices")} == {"ix_vn_stock_prices_date"}
     # `alembic check` does not compare enum values: a new Timeframe member needs its own `ALTER TYPE` migration
