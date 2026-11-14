@@ -1,6 +1,6 @@
-# RD-Agent: LLM-driven factor search
+# Phase 4 — RD-Agent: LLM-driven factor search
 
-Status: **parked** (2026-11-14). Not to start before its prerequisites (below). Related: [logistic-regression-score.md](logistic-regression-score.md) (the baseline RD-Agent must beat), [foundation-model-forecasts.md](foundation-model-forecasts.md).
+Status: **parked** (2026-11-14). Not to start before its prerequisites (below). Related: [phase-3-logistic-regression-score.md](phase-3-logistic-regression-score.md) (the baseline RD-Agent must beat), [phase-5-foundation-model-forecasts.md](phase-5-foundation-model-forecasts.md).
 
 ## Goal
 
@@ -23,13 +23,13 @@ vn_stock_prices → Qlib data → RD-Agent (Linux machine) → candidate factors
 - An LLM chat model and an embedding model through LiteLLM (OpenAI, Azure, DeepSeek, …): paid API keys.
 - Data in Qlib's binary format.
 
-## Phase 0. Prerequisites (gate)
+## Step 0. Prerequisites (gate)
 
 - [ ] History backfilled to several years (for example from 2015) for the HOSE symbols, plus VNINDEX, through a new history fetcher and a seed migration (the daily sync only fetches the latest bar).
-- [ ] The logistic regression plan has reached its phase 3 result (go or no-go), so there is a number to beat.
+- [ ] The logistic regression plan has reached its step 3 result (go or no-go), so there is a number to beat.
 - [ ] The user agrees on an LLM budget per run and a provider.
 
-## Phase 1. Qlib data and a non-LLM baseline
+## Step 1. Qlib data and a non-LLM baseline
 
 - [ ] Export `vn_stock_prices` to one CSV per symbol, convert with Qlib's `dump_bin.py` (`research/`, output git-ignored).
 - [ ] Calendar from the sessions in the table (weekends and VN holidays already absent; `scripts/vn_holiday.py` for the future), instrument lists `hose` and `vn30`, VNINDEX as benchmark.
@@ -37,25 +37,25 @@ vn_stock_prices → Qlib data → RD-Agent (Linux machine) → candidate factors
 - [ ] **Hold-out:** the last 6–12 months are never shown to the agent; they are used once, at the end.
 - [ ] Baseline: Qlib Alpha158 + LightGBM, rolling retrain. Record IC, rank IC and the top-minus-bottom spread on the validation period. Below about 0.03 rank IC, stop here.
 
-## Phase 2. RD-Agent environment
+## Step 2. RD-Agent environment
 
 - [ ] Linux VM with Docker; `pip install rdagent`; `rdagent health_check`.
 - [ ] `.env` with the chat and embedding models (keys never committed).
 - [ ] Point the Qlib templates RD-Agent uses at the HOSE data (market, benchmark, train / valid / test segments ending before the hold-out).
 
-## Phase 3. Factor search
+## Step 3. Factor search
 
 - [ ] `rdagent fin_factor` only (factors alone). Not `fin_quant` (factor and model together) at first: more freedom means more overfitting on short data.
 - [ ] Cap the number of loops and the spend; keep every run's log (the UI: `rdagent ui`).
-- [ ] Keep the factors that beat the phase 1 baseline on the validation period.
+- [ ] Keep the factors that beat the step 1 baseline on the validation period.
 
-## Phase 4. Review and port
+## Step 4. Review and port
 
 - [ ] Read every kept factor's code: no look-ahead, economically sensible, not a near-copy of an existing indicator.
 - [ ] Evaluate the kept factors **once** on the hold-out. Discard the ones that fail.
 - [ ] Port the survivors to `libs/analysis` as indicators (pure function, a row in `scoring.py`, one test each, the 95% coverage gate), or as inputs of the logistic regression.
 
-## Phase 5. Forward check
+## Step 5. Forward check
 
 - [ ] The new indicators run in the daily pipeline for at least 3 months before their weight is raised; compare their rank IC with the hold-out result.
 
