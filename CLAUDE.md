@@ -36,3 +36,7 @@ Use `docker compose exec -T postgres psql -U vnv -d vnv` for ad-hoc SQL; do not 
 ## Table names: `vn_stock_<thing>`
 
 Every table is named `vn_stock_` plus a snake_case noun: `vn_stock_prices`, `vn_stock_rankings`, `vn_stock_screen_history`. A new table follows it from its first migration. Renaming one is a new migration (`op.rename_table`, plus `ALTER INDEX ... RENAME` for its `<table>_pkey` and every `ix_<table>_<column>` index, since `alembic check` compares index names), never an edit of an applied migration, which keeps the old name. Migrations name tables as strings (`sa.table("prices", ...)`), never through the models, so an old revision still finds the table under the name it had then.
+
+## Allowed values: a CHECK constraint, changed only by a migration
+
+A column with a fixed set of values (`decider` and `decision` in `vn_stock_decisions`) is `text` with a `CHECK (<col> IN (...))`, not a Postgres enum, and a numeric range (`probability` from 0 to 1) is a `CHECK` too. Name it `ck_<table>_<column>` and declare it twice, in the migration and in the model's `__table_args__`, because `alembic check` does not compare CHECK constraints. Changing the allowed values is a new migration (`op.drop_constraint`, then `op.create_check_constraint`) plus the same change in the model, in the Python list of the values and in the test that inserts a bad value and expects Postgres to refuse it; never an edit of an applied migration, never a value added in code alone. The existing `timeframe` enum stays as it is.

@@ -56,8 +56,8 @@ Open questions (each blocks the step named):
 
 ### 1. Table `vn_stock_decisions`
 
-- [ ] Migration `0009`: table `vn_stock_decisions`, primary key (`date`, `symbol`, `decider`). Columns: `decider` (Postgres enum `claude` / `jev` / `tabicl`; a new value needs `ALTER TYPE`), `decision` (`buy` / `skip`), `probability` (0–1, the probability of buy), `reason` (text, Claude only), `model_version`, `input` (JSONB: the exact input, so any answer can be re-read; for TabICL the row and the context size, not the context), `created_at`, and the outcome: `return_5` and `hit` (null until known).
-- [ ] SQLModel class in `libs/db/models.py`; the migration names the table as a string (`CLAUDE.md`); a migration test compares the enum with the Python one, as for `timeframe`.
+- [ ] Migration `0009`: table `vn_stock_decisions`, primary key (`date`, `symbol`, `decider`). Columns: `decider` (`text`, `CHECK` in `claude` / `jev` / `tabicl`; a fourth decider is a new migration, see `CLAUDE.md`), `decision` (`text`, `CHECK` in `buy` / `skip`), `probability` (`CHECK` between 0 and 1, the probability of buy), `reason` (text, Claude only), `model_version`, `input` (JSONB: the exact input, so any answer can be re-read; for TabICL the row and the context size, not the context), `created_at`, and the outcome: `return_5` and `hit` (null until known).
+- [ ] SQLModel class in `libs/db/models.py`; the migration names the table as a string (`CLAUDE.md`); the three CHECKs (`ck_vn_stock_decisions_decider`, `_decision`, `_probability`) are in the model's `__table_args__` and in the migration; a test inserts a bad `decider`, a bad `decision`, a `probability` of 1.3 and a duplicate key and expects Postgres to refuse each (`alembic check` ignores CHECK constraints).
 - [ ] Done when: `alembic upgrade head` on a fresh local database creates it and `alembic check` is clean.
 
 ### 2. Shared parts: candidates, input, interface, script
