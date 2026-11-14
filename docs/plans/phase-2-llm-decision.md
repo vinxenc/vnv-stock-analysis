@@ -33,7 +33,9 @@ Decided by the user (2026-11-14):
 - **Delivery: one Telegram channel**, one message per session.
 
 Decided while writing this plan (change if wrong):
-- Only the top N scored symbols (score above 0), `N` one constant, 20 to start, the same N for the three deciders.
+- Only the top N scored symbols (score above 0), `N` one constant, 20 to start, the same N for the three deciders. The candidates of session `t` are read from `vn_stock_rankings`, so that table must hold only the latest run of `t`: today a rerun keeps the older row of a symbol that left the shortlist, which could take a top-N slot. Step 2 changes `vn_stock_analyze` to delete those rows (PR review, 2026-11-14).
+- A decider's rows for `t` always reflect its **latest** run: each run replaces them (delete, then insert its successes, in one transaction), so a symbol that failed on a rerun has no row and shows `—`, never an older answer.
+- A failed decision is retried by hand: the `VN Stock Decide` workflow (`workflow_dispatch`, input: the session) reruns the deciders and the message for a stored session, because the scheduled run never revisits a session already recorded in `vn_stock_screen_history`.
 - **The decisions are not printed in the job summary or the log.** The repository is public, so its job summaries, logs and artifacts are readable by anyone; the decisions go only to the database and the Telegram channel. The job summary shows counts only (symbols decided, buys per decider, failures).
 - One script for the three pipelines, `scripts/vn_stock_decide.py --decider claude|jev|tabicl`; three jobs run it in parallel, so one decider failing never blocks the other two.
 - The decide jobs are leaves: `needs: vn_stock_analyze`; **not** in `vn_stock_screen_done`'s `needs`, so an API outage never leaves the session due.
@@ -59,11 +61,12 @@ Open questions (each blocks the step named):
 
 ### 2. Shared parts: candidates, input, interface, script
 
-- [ ] `libs/decision/candidates.py`: `load_candidates(engine, t, n)` → the top `n` rows of `vn_stock_rankings` for `t` (`score DESC, turnover DESC`) with their last 60 bars of `vn_stock_prices` up to `t`, never after.
+- [ ] Phase 1 change first: `vn_stock_analyze` also deletes the rows of (`as_of`, `timeframe`) whose symbol is not in the report, in the same transaction as the upsert, so `vn_stock_rankings` holds only the latest run of a session. Update its docstring, the README row and the 2026-11-11 decision of the Phase 1 plan ("a symbol that left the shortlist keeps its older row" no longer holds). Test: a rerun with a smaller shortlist leaves only the new symbols.
+- [ ] `libs/decision/candidates.py`: `load_candidates(engine, t, n)` → the top `n` rows of `vn_stock_rankings` for `t` (`score DESC, turnover DESC`) with their last 60 bars of `vn_stock_prices` up to `t`, never after. Works for any stored session, so the retry workflow (step 8) can use it.
 - [ ] `libs/decision/base.py`: `Decision(decision, probability, reason, model_version)` and the interface `Decider.decide_all(t, candidates) -> dict[symbol, Decision]` (TabICL scores all candidates in one pass; the API deciders loop inside). Same pattern as `Indicators` in `libs/indicators`.
-- [ ] `scripts/vn_stock_decide.py --decider <name>`: session `t` from the analysis → `load_candidates` → the decider → upsert into `vn_stock_decisions` (a rerun overwrites that decider's rows for `t`). One failed symbol does not stop the others; the script exits non-zero at the end if any failed. Job summary: counts only.
+- [ ] `scripts/vn_stock_decide.py --decider <name> [--session t]`: session `t` from the analysis (or the argument, for a retry) → `load_candidates` → the decider → in one transaction, delete that decider's rows for `t` and insert this run's successes. One failed symbol does not stop the others; the script exits non-zero at the end if any failed. Job summary: counts only.
 - [ ] Log through `Logger` (no decisions in the log, see "Decisions"), including the token counts or cost.
-- [ ] Tests on the real Postgres fixture with a fake decider: order, `n`, no bar after `t`, one symbol failing, no candidate, rerun overwrites.
+- [ ] Tests on the real Postgres fixture with a fake decider: order, `n`, no bar after `t`, one symbol failing, no candidate, a rerun replaces the rows, a rerun where a symbol fails leaves that symbol without a row.
 - [ ] Done when: the script runs end to end with the fake decider.
 
 ### 3. Claude decider
@@ -93,13 +96,14 @@ Open questions (each blocks the step named):
 
 ### 6. Outcome job
 
-- [ ] `scripts/vn_stock_decision_outcome.py`: one SQL `UPDATE` for rows with `hit` null whose symbol has a bar 5 sessions after `t`: `return_5 = close(t+5) / close(t) − 1`, `hit = return_5 ≥ 0.03`. Sessions counted from the symbol's own bars. Idempotent: rows not due stay null.
-- [ ] Tests on the real Postgres fixture: due, not due, exactly +3%, a halted symbol.
+- [ ] `scripts/vn_stock_decision_outcome.py`: one SQL `UPDATE` for rows with `hit` null. `t+5` is the fifth **market** session after `t` (the fifth distinct date after `t` in `vn_stock_prices`, all symbols); the row is filled only when the symbol has a bar on that exact date: `return_5 = close(t+5) / close(t) − 1`, `hit = return_5 ≥ 0.03`. A symbol halted on `t+5` keeps an empty outcome, even if it trades again later (counting its own bars would pick a later bar).
+- [ ] Idempotent: rows not due yet, or whose bar is not stored yet, stay null and are picked up by a later run.
+- [ ] Tests on the real Postgres fixture: due, not due, exactly +3%, a symbol halted on `t+5` that trades on `t+6`.
 - [ ] Done when: running it twice gives the same table.
 
 ### 7. Telegram message
 
-- [ ] `scripts/vn_stock_decision_notify.py`: reads the rows of `t` from `vn_stock_decisions` and sends one message with the Bot API `sendMessage` (`niquests`, `parse_mode` HTML with escaping). Secrets `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+- [ ] `scripts/vn_stock_decision_notify.py [--session t]`: loads the candidates of `t` (`load_candidates`) and left-joins their rows of `vn_stock_decisions`, so a candidate every decider failed on still gets its line (three `—`); then sends one message with the Bot API `sendMessage` (`niquests`, `parse_mode` HTML with escaping). Secrets `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 - [ ] Layout: header with the session date; one line per symbol in ranking order with its score and each decider's decision and probability (`—` when that decider failed or did not run); a footer with buys per decider, last month's measured hit rate per decider once step 9 has numbers, and a one-line "for reference only".
 - [ ] Split at Telegram's 4096-character limit; retry once on a network error, then fail the job.
 - [ ] The token is never logged (it is part of the URL: log the method, never the URL).
@@ -111,11 +115,12 @@ Open questions (each blocks the step named):
 
 - [ ] In `.github/workflows/vn-stock-analysis.yml`, three parallel jobs `vn_stock_decide_claude`, `vn_stock_decide_jev`, `vn_stock_decide_tabicl`: each `needs: vn_stock_analyze`, `environment: production`, `DATABASE_URL` plus its own key (TabICL needs none; it restores the checkpoint cache). Same boilerplate as the other jobs (pinned actions, `setup-env`, timeout).
 - [ ] Job `vn_stock_decision_notify`: `needs` the three decide jobs, `if: always()` and the session was screened, so it runs when one decider failed; secrets `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
-- [ ] Job `vn_stock_decision_outcome`: `needs: install` only, so it runs even on a day with nothing to screen.
-- [ ] All end with the `pipeline-state` action and go into `notification`'s `needs`; none in `vn_stock_screen_done`'s `needs`.
+- [ ] Job `vn_stock_decision_outcome` in `.github/workflows/vn-stock-prices-sync.yml`, `needs: vn_stock_daily_price_store`: it runs right after the bars it needs are stored, every working day, whether or not the analysis screens anything.
+- [ ] Retry workflow `.github/workflows/vn-stock-decide.yml` (`VN Stock Decide`): `workflow_dispatch` only, input `session` (a date already in `vn_stock_screen_history`); the three decide jobs and the notify job with `--session`, same jobs as above. No screen, no analysis.
+- [ ] All end with the `pipeline-state` action and go into their workflow's `notification` `needs`; none in `vn_stock_screen_done`'s `needs`.
 - [ ] The user adds the five secrets to the `production` environment.
 - [ ] README: files table and job list.
-- [ ] Done when: a real `workflow_dispatch` run stores 3 × N rows, the channel gets the message, and a wrong Jev key fails only `vn_stock_decide_jev` while the message still arrives with Jev's column empty.
+- [ ] Done when: a real `workflow_dispatch` run stores 3 × N rows, the channel gets the message, and a wrong Jev key fails only `vn_stock_decide_jev` while the message still arrives with Jev's column empty; then `VN Stock Decide` with that session and the right key fills Jev's rows and resends the message.
 
 ### 9. Measure, then adjust
 

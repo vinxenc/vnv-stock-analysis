@@ -73,7 +73,7 @@ Both models on the same folds, both labels (`beat_median` first, `hit_3pct_5` se
 - [ ] If the coefficients are unstable: group the inputs into the 6 themes (6 features) and rerun both.
 - [ ] Results, the coefficient table and the importance table go into this file.
 
-**Go / no-go** for step 5, per model, all three on the test months: AUC ≥ 0.52; non-overlapping IC t-stat ≥ 2; beats both baselines on IC in most months. If both pass, logistic is kept unless LightGBM is clearly better (for example a higher IC in most months).
+**Go / no-go** for step 5, **per model and per label** (each label has its own trained models), all three on the test months: AUC ≥ 0.52; non-overlapping IC t-stat ≥ 2; beats both baselines on IC in most months. A pass on `beat_median` says nothing about `hit_3pct_5`: step 5c needs the `hit_3pct_5` model's own pass. If both model types pass for a label, logistic is kept unless LightGBM is clearly better (for example a higher IC in most months).
 
 ## Step 4. Extra inputs from `vn_stock_prices`
 
@@ -86,7 +86,7 @@ Only stationary, comparable-across-symbols features; never raw prices or raw vol
 - [ ] `max_return_20` (lottery effect), `drawdown_60`
 - [ ] `volume_change_1`
 - [ ] Skip days whose one-day change is beyond ±7% (ex-rights on adjusted prices) when counting limit days.
-- [ ] Rerun step 3 (both models) with 20 + these inputs; keep a new input only if the **test** AUC and IC improve.
+- [ ] Rerun step 3 (both models) with 20 + these inputs. Choose which new inputs to keep **inside each training window** (its inner walk-forward), never from the test months: the outer test months then score the whole procedure (selection included) once, and their numbers stay an honest estimate.
 
 ## Step 5. Use the result (only after a "go")
 
@@ -95,10 +95,10 @@ Pick one:
 - [ ] **(b) Add the model to the pipeline:**
   - [ ] The trained model stored in a new table `vn_stock_<thing>` (naming rule in `CLAUDE.md`), one row per training run with its training window and test metrics; Alembic migration. Logistic: coefficients and standardisation parameters. LightGBM: the booster as text (`model_to_string`) and its calibration map.
   - [ ] Monthly retrain: a job of `VN Stock Analysis` that runs on the first session of the month (or when no coefficients exist), not a new workflow; reads `vn_stock_prices`, needs `DATABASE_URL`; ends with `pipeline-state`, added to `notification`'s `needs`.
-  - [ ] Daily: `vn_stock_analyze` multiplies today's raw values by the latest coefficients; the probability is stored next to the score in `vn_stock_rankings` and shown in the job summary.
+  - [ ] Daily: `vn_stock_analyze` multiplies today's raw values by the latest coefficients (logistic), or, for LightGBM, loads the stored booster text, predicts on today's raw values and applies the stored calibration map; the probability is stored next to the score in `vn_stock_rankings` and shown in the job summary.
   - [ ] scikit-learn only where needed (the daily logistic part is a dot product and needs none; LightGBM needs `lightgbm` in the job that scores, in its own dependency group).
   - [ ] Tests with the 95% gate; README updated.
-- [ ] **(c) A fourth decider in Phase 2**: the kept model's probability of `hit_3pct_5` above a threshold = buy, stored in `vn_stock_decisions` next to Claude, Jev and TabICL and scored the same way.
+- [ ] **(c) A fourth decider in Phase 2**, only if the `hit_3pct_5` model passed its own go / no-go: that model's probability of `hit_3pct_5` above a threshold = buy, stored in `vn_stock_decisions` next to Claude, Jev and TabICL and scored the same way.
 - [ ] Forward check: the first 3 months of live probabilities are evaluated with the same metrics before anyone relies on them.
 
 ## Step 6. Later, only if step 3 works
