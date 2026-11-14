@@ -1,101 +1,132 @@
-# Phase 2 — Buy / skip decision per symbol (Claude and Jev)
+# Phase 2 — Buy / skip decision per symbol (Claude, Jev, TabICL) and a Telegram channel
 
-Status: **draft, not started** (2026-11-14; first draft 2026-10-28 was a market summary, replaced). Comes after [phase-1-sql-screens.md](phase-1-sql-screens.md), which has run green on GitHub since 2026-11-11. Work through the checklist below in order: one step = one PR.
+Status: **draft, not started** (2026-11-14; first draft 2026-10-28 was a market summary, replaced). Comes after [phase-1-sql-screens.md](phase-1-sql-screens.md), which has run green on GitHub since 2026-11-11. Work through the checklist below in order: one step = one PR. The TabICL step needs the feature panel of [phase-3-logistic-regression-score.md](phase-3-logistic-regression-score.md) step 1.
 
 ## Goal
 
-For each of the top N symbols of the Phase 1 ranking, give **one symbol's data** to a model and get back **buy or skip, with a probability**. Two models answer side by side, Claude (LLM) and [Jev](https://openrouter.ai/blog/insights/what-is-jev/) (TypeSafe's decision model), and every answer is stored. Five sessions later the outcome is filled in, so each model's hit rate and calibration can be measured, and the setup (prompt, threshold, calibration, inputs) is adjusted from what is measured.
+For each of the top N symbols of the Phase 1 ranking, **three deciders answer buy or skip, with a probability**, in three parallel pipelines (GitHub Actions jobs):
 
-The decision is the system's output for the user to screen with; the user decides what to trade.
+| Decider | Kind | Reads | Runs |
+|---|---|---|---|
+| **Claude** | LLM, API | one symbol's data as JSON | API call per symbol |
+| **Jev** (TypeSafe) | decision model, API | the same JSON as state, one typed question | API call per symbol |
+| **TabICL** | tabular foundation model, open source (BSD-3) | the symbol's feature row, with the labelled history of all symbols as context | on the runner's CPU |
+
+Every answer is stored in `vn_stock_decisions`; five sessions later the outcome is filled in, so the three are measured on the same rows. Once all three have answered, **one Telegram message** with the session's decisions goes to one channel.
+
+The decisions are the system's output for the user to screen with; the user decides what to trade.
 
 ## Prerequisites
 
 - [x] Phase 1 has run reliably for a few days (green runs on 2026-11-11, 12 and 13; the one cron failure, 11-12, was a false alarm: GitHub started the run after midnight VN).
-- [ ] A TypeSafe (or reseller) account and API key for Jev, and an Anthropic API key: created by the user, never seen by Claude.
+- [ ] Accounts and keys, created by the user and never seen by Claude: Anthropic API key, TypeSafe (or reseller) key for Jev, a Telegram bot (BotFather) and the channel it posts to (bot added as admin), its chat id.
+- [ ] For TabICL only: Phase 3 step 1 (`libs/decision/panel.py`) is built.
 
 ## Decisions and open items
 
 Decided by the user (2026-11-14):
-- **Per symbol, independent.** One call per symbol and model; no market overview, no comparison between symbols in one call.
-- **Both models, side by side:** each symbol is sent to Claude and to Jev; both answers go into the same table. Cost: twice the calls.
-- **A buy is right** when `close(t+5) ≥ close(t) × 1.03`: the close 5 sessions after the session decided (`t`) is at least 3% above the close of `t`. Sessions, not calendar days. A skip is right when that does not happen.
-- **Input today:** that symbol's row of `vn_stock_rankings` (score, themes, indicators with raw values, flags) plus its last 60 sessions of `vn_stock_prices`. More sources later are more fields in the input, not a new design.
-- **"Adjusted over time"** means what is around the models, since their weights cannot be trained on this data: a calibration map from stated probability to measured hit rate, the buy threshold, the prompt / question, and later the Phase 3 probability as one more input.
+- **Per symbol, independent:** one answer per symbol and decider; no market overview, no comparison between symbols in one answer.
+- **Three deciders in parallel** (Claude, Jev, TabICL), all stored in the same table.
+- **A buy is right** when `close(t+5) ≥ close(t) × 1.03`: the close 5 sessions after the session decided (`t`) is at least 3% above the close of `t`. Sessions, not calendar days.
+- **Inputs today:** `vn_stock_rankings` (score, themes, indicators with raw values, flags) and `vn_stock_prices`. More sources later are more fields, not a new design.
+- **"Adjusted over time"**: for Claude and Jev, what is around them (calibration map from stated to measured probability, buy threshold, prompt / question), since their weights cannot be trained here; for TabICL, the context grows by itself as outcomes arrive.
+- **Delivery: one Telegram channel**, one message per session.
 
 Decided while writing this plan (change if wrong):
-- Only the top N scored symbols (score above 0), `N` one constant, 20 to start.
-- The job reads and writes the database (`DATABASE_URL`), because both its inputs and its output are tables.
-- Leaf job: `needs: vn_stock_analyze`; only `notification` needs it, **not** `vn_stock_screen_done`, so an API outage never leaves the session due.
+- Only the top N scored symbols (score above 0), `N` one constant, 20 to start, the same N for the three deciders.
+- **The decisions are not printed in the job summary or the log.** The repository is public, so its job summaries, logs and artifacts are readable by anyone; the decisions go only to the database and the Telegram channel. The job summary shows counts only (symbols decided, buys per decider, failures).
+- One script for the three pipelines, `scripts/vn_stock_decide.py --decider claude|jev|tabicl`; three jobs run it in parallel, so one decider failing never blocks the other two.
+- The decide jobs are leaves: `needs: vn_stock_analyze`; **not** in `vn_stock_screen_done`'s `needs`, so an API outage never leaves the session due.
+- The Telegram job sends whatever is stored, even when a decider failed (its column says so); only a Telegram error fails that job.
+- Telegram is called with `niquests` (already a dependency), no Telegram library.
+- TabICL's dependencies (torch CPU build, `tabicl`) go in their own dependency group, installed only by its job; the other jobs keep their light `--no-dev` install. Its checkpoint is cached with `actions/cache`.
 - Known limits of the label: the decision is made after the close of `t`, so `close(t)` is not a price anyone could still buy at; the label is optimistic by one session's move. Adjusted prices skew an ex-rights week (Phase 1 Notes). A halted symbol with no bar at `t+5` keeps an empty outcome.
 
 Open questions (each blocks the step named):
-1. Jev endpoint: TypeSafe's own API or a reseller (OpenRouter, AI/ML API); the sources disagree on the URL. Read the official docs when building. (step 3)
-2. Claude model and `anthropic` SDK vs `niquests` (SDK is the default). (step 3)
-3. Reason language for Claude: Vietnamese? (step 3)
-4. Daily cost ceiling and the final `N`. (step 7)
+1. Claude model, `anthropic` SDK vs `niquests` (SDK is the default), language of Claude's reason (Vietnamese?). (step 3)
+2. Jev endpoint: TypeSafe's own API or a reseller (OpenRouter, AI/ML API); the sources disagree on the URL. (step 4)
+3. TabICL version (v2 by default) and the context size (all labelled rows, or the last K sessions), from the time measured on the runner. (step 5)
+4. Message language and layout in Telegram (one line per symbol by default). (step 7)
+5. Daily cost ceiling and the final `N`. (step 9)
 
 ## Checklist
 
 ### 1. Table `vn_stock_decisions`
 
-- [ ] Migration `0009`: table `vn_stock_decisions`, primary key (`date`, `symbol`, `model`). Columns: `decision` (`buy` / `skip`), `probability` (0–1, the probability of buy as the model states it), `reason` (text, null for Jev), `model_version`, `input` (JSONB: the exact input sent, so any answer can be re-read later), `created_at`, and the outcome: `return_5` (null until known) and `hit` (boolean, null until known).
-- [ ] SQLModel class in `libs/db/models.py`; the migration names the table as a string (`CLAUDE.md`).
-- [ ] Migration test like the existing ones; `alembic check` clean.
-- [ ] Done when: `alembic upgrade head` on a fresh local database creates it.
+- [ ] Migration `0009`: table `vn_stock_decisions`, primary key (`date`, `symbol`, `decider`). Columns: `decider` (Postgres enum `claude` / `jev` / `tabicl`; a new value needs `ALTER TYPE`), `decision` (`buy` / `skip`), `probability` (0–1, the probability of buy), `reason` (text, Claude only), `model_version`, `input` (JSONB: the exact input, so any answer can be re-read; for TabICL the row and the context size, not the context), `created_at`, and the outcome: `return_5` and `hit` (null until known).
+- [ ] SQLModel class in `libs/db/models.py`; the migration names the table as a string (`CLAUDE.md`); a migration test compares the enum with the Python one, as for `timeframe`.
+- [ ] Done when: `alembic upgrade head` on a fresh local database creates it and `alembic check` is clean.
 
-### 2. Input per symbol (pure function plus one query, no API)
+### 2. Shared parts: candidates, input, interface, script
 
-- [ ] `libs/decision/input.py`: `build_input(ranking_row, bars)` → one pydantic model: symbol, session `t`, score, coverage, themes, indicators (status, points, raw), flags, and the last 60 bars (date, open, high, low, close, volume).
-- [ ] `load_candidates(engine, t, n)`: the top `n` rows of `vn_stock_rankings` for `t` (`score DESC, turnover DESC`) and their bars from `vn_stock_prices` up to `t`, never after (no look-ahead).
-- [ ] Tests on the real Postgres fixture: order, `n`, no bar after `t`, a symbol with fewer than 60 bars.
-- [ ] Done when: for a real session the input of one symbol is readable on one screen.
+- [ ] `libs/decision/candidates.py`: `load_candidates(engine, t, n)` → the top `n` rows of `vn_stock_rankings` for `t` (`score DESC, turnover DESC`) with their last 60 bars of `vn_stock_prices` up to `t`, never after.
+- [ ] `libs/decision/base.py`: `Decision(decision, probability, reason, model_version)` and the interface `Decider.decide_all(t, candidates) -> dict[symbol, Decision]` (TabICL scores all candidates in one pass; the API deciders loop inside). Same pattern as `Indicators` in `libs/indicators`.
+- [ ] `scripts/vn_stock_decide.py --decider <name>`: session `t` from the analysis → `load_candidates` → the decider → upsert into `vn_stock_decisions` (a rerun overwrites that decider's rows for `t`). One failed symbol does not stop the others; the script exits non-zero at the end if any failed. Job summary: counts only.
+- [ ] Log through `Logger` (no decisions in the log, see "Decisions"), including the token counts or cost.
+- [ ] Tests on the real Postgres fixture with a fake decider: order, `n`, no bar after `t`, one symbol failing, no candidate, rerun overwrites.
+- [ ] Done when: the script runs end to end with the fake decider.
 
-### 3. The two deciders (mocked in tests)
+### 3. Claude decider
 
-- [ ] One small interface `Decider` with `decide(input) -> Decision(decision, probability, reason, model_version)`, like `Indicators` in `libs/indicators`: one class per model, the client passed in, so tests mock it.
-- [ ] `ClaudeDecider`: one call, structured JSON output `{decision, probability, reason}`; the prompt says to judge only from the data given, invent nothing (news, financials, other symbols), report an `unavailable` indicator as such, and states the target (+3% in 5 sessions) so the probability means that.
-- [ ] `JevDecider`: the same input as state, one typed question "will the close 5 sessions after `t` be ≥ 3% above the close of `t`?" with options `buy` / `skip`; `probability` = Jev's probability of `buy`.
-- [ ] Answer open questions 1–3 first; pick parameters from the current docs (the `claude-api` skill for Claude).
-- [ ] Tests: each decider maps a mocked answer to `Decision`; a malformed answer or an out-of-range probability raises.
-- [ ] Done when: both are covered by tests, with no network and no secret.
+- [ ] Answer open question 1; pick the model and parameters from the current API docs (the `claude-api` skill).
+- [ ] `ClaudeDecider`: one call per symbol, structured JSON output `{decision, probability, reason}`. The prompt states the target (+3% in 5 sessions) so the probability means that; judge only from the data given; invent nothing (news, financials, other symbols); report an `unavailable` indicator as such.
+- [ ] Tests with a mocked client: a good answer, a malformed one, a probability out of range, an API error.
+- [ ] **Manual run** against the local database with the user's key (in the shell only): read the answers, adjust the prompt.
+- [ ] Done when: tests pass and a manual run stores N rows.
 
-### 4. `scripts/vn_stock_decide.py`
+### 4. Jev decider
 
-- [ ] For the session `t` of the analysis: `load_candidates` → for each symbol and each decider, one call → upsert into `vn_stock_decisions` (a rerun of a session overwrites its rows).
-- [ ] One failed call does not stop the others; the script logs it and exits non-zero at the end.
-- [ ] Writes a table to `$GITHUB_STEP_SUMMARY`: symbol, score, Claude decision and probability, Jev decision and probability.
-- [ ] Log through `Logger`, including the token counts or cost per model.
-- [ ] Tests with mocked deciders: all succeed, one fails among several, no candidate.
-- [ ] **Manual run** on this machine against the local database with the user's keys (in the shell only): read the answers, adjust the prompt and the question.
-- [ ] Done when: a manual run stores 2 × N rows for one session.
+- [ ] Answer open question 2 from the official docs.
+- [ ] `JevDecider`: the same JSON as state, one typed question "will the close 5 sessions after `t` be ≥ 3% above the close of `t`?" with options `buy` / `skip`; `probability` = Jev's probability of `buy`.
+- [ ] Tests with a mocked HTTP client: a good answer, a malformed one, an API error.
+- [ ] Manual run with the user's key.
+- [ ] Done when: tests pass and a manual run stores N rows.
 
-### 5. `scripts/vn_stock_decision_outcome.py`
+### 5. TabICL decider
 
-- [ ] One SQL `UPDATE`: for rows with `hit` null whose symbol has a bar 5 sessions after `t` in `vn_stock_prices`, set `return_5 = close(t+5) / close(t) − 1` and `hit = return_5 ≥ 0.03`. Sessions counted from the symbol's own bars.
-- [ ] Idempotent: run it every day; rows not due yet stay null.
+- [ ] Dependency group `tabicl` (torch from the CPU index, `tabicl`); `uv.lock` refreshed; `pip-audit` covers it.
+- [ ] `TabICLDecider`: context = the rows of `build_panel` (Phase 3 step 1) whose `hit_3pct_5` is known, i.e. sessions up to `t − 5`, never later (their label would need bars after `t`); query = the candidates' rows for `t`. `probability` = P(`hit_3pct_5` = 1); buy when above a threshold (0.5 to start, set in step 9).
+- [ ] **Backtest before trusting it** (TabICL, unlike Claude and Jev, can be tested on the past): the walk-forward of Phase 3 step 2 with `hit_3pct_5`; compare with the base rate and with Phase 3's logistic and LightGBM; results into this file.
+- [ ] Measure time and memory on a GitHub runner (4 vCPU, 16 GB) with a `workflow_dispatch` test job; set `timeout-minutes` and the context size from it (open question 3).
+- [ ] Tests: the context never holds a row whose label needs a bar after `t`; a mocked model maps to `Decision`.
+- [ ] Done when: the backtest numbers are in this file and one run on the runner fits in its timeout.
+
+### 6. Outcome job
+
+- [ ] `scripts/vn_stock_decision_outcome.py`: one SQL `UPDATE` for rows with `hit` null whose symbol has a bar 5 sessions after `t`: `return_5 = close(t+5) / close(t) − 1`, `hit = return_5 ≥ 0.03`. Sessions counted from the symbol's own bars. Idempotent: rows not due stay null.
 - [ ] Tests on the real Postgres fixture: due, not due, exactly +3%, a halted symbol.
 - [ ] Done when: running it twice gives the same table.
 
-### 6. Workflow jobs
+### 7. Telegram message
 
-- [ ] Job `vn_stock_decide` in `.github/workflows/vn-stock-analysis.yml`: `needs: vn_stock_analyze`, `environment: production`, secrets `DATABASE_URL`, `ANTHROPIC_API_KEY`, `TYPESAFE_API_KEY`. Same boilerplate as the other jobs (pinned actions, `setup-env`, timeout).
-- [ ] Job `vn_stock_decision_outcome`: `needs: install`, independent of the screen (it only needs prices), so it runs even on a day with nothing to screen.
-- [ ] Both end with the `pipeline-state` action and are added to `notification`'s `needs`; neither is in `vn_stock_screen_done`'s `needs`.
-- [ ] The user adds the two API keys to the `production` environment.
+- [ ] `scripts/vn_stock_decision_notify.py`: reads the rows of `t` from `vn_stock_decisions` and sends one message with the Bot API `sendMessage` (`niquests`, `parse_mode` HTML with escaping). Secrets `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+- [ ] Layout: header with the session date; one line per symbol in ranking order with its score and each decider's decision and probability (`—` when that decider failed or did not run); a footer with buys per decider, last month's measured hit rate per decider once step 9 has numbers, and a one-line "for reference only".
+- [ ] Split at Telegram's 4096-character limit; retry once on a network error, then fail the job.
+- [ ] The token is never logged (it is part of the URL: log the method, never the URL).
+- [ ] Tests with a mocked HTTP client: one message, a split message, a missing decider, Telegram returning an error.
+- [ ] Manual run to the real channel with the user's token.
+- [ ] Done when: the channel receives a readable message for a real session.
+
+### 8. Workflow wiring
+
+- [ ] In `.github/workflows/vn-stock-analysis.yml`, three parallel jobs `vn_stock_decide_claude`, `vn_stock_decide_jev`, `vn_stock_decide_tabicl`: each `needs: vn_stock_analyze`, `environment: production`, `DATABASE_URL` plus its own key (TabICL needs none; it restores the checkpoint cache). Same boilerplate as the other jobs (pinned actions, `setup-env`, timeout).
+- [ ] Job `vn_stock_decision_notify`: `needs` the three decide jobs, `if: always()` and the session was screened, so it runs when one decider failed; secrets `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+- [ ] Job `vn_stock_decision_outcome`: `needs: install` only, so it runs even on a day with nothing to screen.
+- [ ] All end with the `pipeline-state` action and go into `notification`'s `needs`; none in `vn_stock_screen_done`'s `needs`.
+- [ ] The user adds the five secrets to the `production` environment.
 - [ ] README: files table and job list.
-- [ ] Done when: a real `workflow_dispatch` run stores the decisions, shows the table in the job summary, and a wrong key fails only `vn_stock_decide`.
+- [ ] Done when: a real `workflow_dispatch` run stores 3 × N rows, the channel gets the message, and a wrong Jev key fails only `vn_stock_decide_jev` while the message still arrives with Jev's column empty.
 
-### 7. Measure, then adjust
+### 9. Measure, then adjust
 
-- [ ] After about 20 sessions with outcomes (about 2 × 20 × 20 = 800 rows), one SQL report per model:
-  - [ ] Hit rate of `buy` against the **base rate** (the share of all decided rows that reached +3%, whatever the decision). A model is only useful if its buys beat the base rate.
-  - [ ] Calibration: bins of stated probability vs measured hit rate; Brier score.
-  - [ ] Against two baselines: "buy every top-N symbol" and "buy the top 5 by score".
-  - [ ] Claude vs Jev on the same rows.
-- [ ] Adjust from the numbers: a calibration map (stated → measured probability), the buy threshold, the prompt / question; drop the model that loses on the same rows if the gap holds.
-- [ ] Later inputs: the Phase 3 probability once that plan reaches a "go", more data sources as they arrive. Each change is measured the same way before it is kept.
-- [ ] Set `N` and the cost ceiling (open question 4).
-- [ ] Done when: the report exists and has been read once with real outcomes; `uv run pytest` ≥ 95% coverage, ruff clean.
+- [ ] After about 20 sessions with outcomes (about 3 × 20 × 20 = 1,200 rows), one SQL report per decider:
+  - [ ] Hit rate of `buy` against the **base rate** (the share of all decided rows that reached +3%, whatever the decision). A decider is only useful if its buys beat the base rate.
+  - [ ] Calibration (bins of stated probability vs measured hit rate) and Brier score.
+  - [ ] Against two baselines: "buy every top-N symbol" and "buy the top 5 by score"; and the three deciders against each other on the same rows.
+- [ ] Adjust from the numbers: a calibration map per decider, the buy thresholds, Claude's prompt and Jev's question, TabICL's context size; drop a decider that keeps losing on the same rows.
+- [ ] Add Phase 3's kept model (logistic or LightGBM) as a fourth decider once that plan reaches a "go" (its step 5c).
+- [ ] Set `N` and the cost ceiling (open question 5).
+- [ ] Done when: the report has been read once with real outcomes; `uv run pytest` ≥ 95% coverage, ruff clean.
 
 ## After Phase 2 (not planned yet)
 
