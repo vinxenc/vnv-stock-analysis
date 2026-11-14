@@ -1,8 +1,8 @@
 # Phase 1 — Screens and analysis (no LLM)
 
-Status: **built, waiting for the first real run on GitHub** (2026-11-11): steps 1–4 are implemented, the screen takes its session from a history table (see the 2026-11-11 decision), see "Decisions and open items" and the checklist of step 4. Next phase: [phase-2-llm-summary.md](phase-2-llm-summary.md).
+Status: **built and running on GitHub** (2026-11-14): steps 1–4 are implemented and the pipeline has run green on GitHub since 2026-11-11 (workflow_dispatch and the schedule); only the "not due" path of step 5 is still unseen on GitHub. The screen takes its session from a history table (see the 2026-11-11 decision), see "Decisions and open items" and the checklist of step 4. Next phase: [phase-2-llm-decision.md](phase-2-llm-decision.md).
 
-Option 1 = "build a short list from the data, then one LLM call writes the summary", split into 2 phases: **Phase 1 has no LLM**, Phase 2 adds the LLM call.
+Option 1 = "build a short list from the data, then an LLM works on it", split into 2 phases: **Phase 1 has no LLM**, Phase 2 adds the LLM (since 2026-11-14: a buy / skip decision per symbol).
 
 ## Decisions and open items
 
@@ -74,7 +74,7 @@ Every new job follows the existing pattern: `environment: production` when it ne
 - [x] SQL: turnover = `close × volume` (thousand VND). Keep symbols with a row today whose **average turnover over their last 20 rows ≥ 20 billion VND per day** = 20,000,000 thousand VND. Keep the threshold as one named constant in the script.
 - [x] Symbols with `volume = 0` (halted) drop out naturally; log how many were kept and dropped.
 - [x] **Before trusting the threshold, verify the volume definition.** VNDirect's `nmVolume` is matched volume only (no put-through trades); DNSE and VPS `v` must be the same unit (shares) and definition, otherwise a symbol's turnover changes with whichever source answered that day. Compare one liquid symbol on the same day across the 3 sources. Done: README "Adding a price source" (2026-10-29: HPG, VCB, AAM over 8 sessions) and re-run live on 2026-11-06 for HPG, VCB, SSI, VIC: identical close and volume in all 3 sources.
-- [~] Market-wide numbers (advancers / decliners / unchanged, total volume, total turnover, median one-day change over every symbol with a row on today's session and the preceding one) are **deferred to Phase 2**, see [phase-2-llm-summary.md](phase-2-llm-summary.md). No Phase 1 indicator uses them, and `prices` keeps the data, so computing them later loses nothing.
+- [~] Market-wide numbers (advancers / decliners / unchanged, total volume, total turnover, median one-day change over every symbol with a row on today's session and the preceding one) were deferred to Phase 2, then **dropped** on 2026-11-14 (Phase 2 assesses each symbol on its own), see [phase-2-llm-decision.md](phase-2-llm-decision.md).
 - [x] Output artifact `vn-stock-screen` with `liquid_symbols.csv` (a `code` column, same shape as `data/hose_symbols.csv`, so `read_symbols` is reused). No `market.json` in Phase 1 (deferred, see above).
 - [x] Exit 4 (the existing "no data" code) when the shortlist is empty; the job then fails.
 - [x] Tests on the real Postgres fixture: threshold edge (exactly 20 billion kept), halted symbol, wrong `max(date)`.
@@ -104,8 +104,8 @@ Every new job follows the existing pattern: `environment: production` when it ne
 ### 5. Done when
 
 - [x] A manual run against a local DB with fake data gives the right shortlist, history and JSON. Done on the real local database (sync of 2026-11-10 plus the DNSE bars of 2026-11-09): 88 symbols screened, 87 scored.
-- [ ] A real `workflow_dispatch` run shows the score table in the job summary and stores its rows in `vn_stock_rankings` (CD must apply `0006` first). **Not done yet: needs a push and a run on GitHub.**
-- [ ] A day off, or a session already screened: `vn_stock_screen` exits 5 and all jobs after it are skipped (no `is_holiday` job since 2026-11-11). A failed sync (no bar on the session due): `vn_stock_screen` fails instead of reporting old data, and the next run retries that session. The sync workflow's cron and jobs are unchanged. **Not verified on GitHub yet** (covered by the screen's unit tests).
+- [x] A real `workflow_dispatch` run shows the score table in the job summary and stores its rows in `vn_stock_rankings` (CD must apply `0006` first). Done: dispatch runs of 2026-11-11, 12 and 13 and the scheduled runs of 11-11 and 11-13 all finished green, including the upsert job step. The stored rows themselves were not queried (production database not checked).
+- [ ] A day off, or a session already screened: `vn_stock_screen` exits 5 and all jobs after it are skipped, except `notification` (`if: always()`: it still runs and reports the skip); no `is_holiday` job since 2026-11-11. A failed sync (no bar on the session due): `vn_stock_screen` fails instead of reporting old data, and the next run retries that session. The sync workflow's cron and jobs are unchanged. **Partly verified on GitHub:** the failed-sync case was seen on 2026-11-12 (the cron started at 00:06 VN on the 13th, so session 11-13 was due, had no bar, and `vn_stock_screen` failed with `no bar on 2026-11-13`; a false alarm caused by GitHub's delay, and the session was not lost). The day-off / already-screened exit 5 is not seen yet (covered by the screen's unit tests).
 - [x] `uv run pytest` ≥ 95% coverage, ruff clean. (98.1%)
 
 ## Scoring design (buy side, trend / breakout profile)

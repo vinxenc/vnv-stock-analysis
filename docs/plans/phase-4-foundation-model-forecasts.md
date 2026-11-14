@@ -1,6 +1,6 @@
-# Forecasting foundation models (Kronos, Chronos-2, TiRex-2): results and reference
+# Phase 4 — Forecasting foundation models (Kronos, Chronos-2, TiRex-2): results and reference
 
-Status: **reference** (2026-11-14). Zero-shot backtests done; none is good enough to enter the score. TiRex-2 is the only candidate worth a forward test, not started (where it runs is undecided). **The research code below (`research/kronos_backtest.py`, `research/online_correction.py`, the vendored `research/kronos/`, the dependency group `kronos`) was not committed**: this file keeps its design and results; rebuild it from the description if a model is revisited. Related: [logistic-regression-score.md](logistic-regression-score.md), [rd-agent.md](rd-agent.md).
+Status: **reference** (2026-11-14). Zero-shot backtests done; none is good enough to enter the score. TiRex-2 is the only candidate worth a forward test, not started (where it runs is undecided). **The research code below (`research/kronos_backtest.py`, `research/online_correction.py`, the vendored `research/kronos/`, the dependency group `kronos`) was not committed**: this file keeps its design and results; rebuild it from the description if a model is revisited. Related: [phase-3-logistic-regression-score.md](phase-3-logistic-regression-score.md), [phase-5-rd-agent.md](phase-5-rd-agent.md).
 
 ## The models
 
@@ -100,4 +100,4 @@ Options weighed on 2026-11-14:
 ### Other uses worth trying later
 
 - [ ] TiRex-2's p10–p90 band as a volatility / risk input (models of this kind forecast spread better than direction); check its coverage (share of outcomes inside the band).
-- [ ] TiRex-2's 5-session median forecast as one more input of the logistic regression (phase 4 of that plan), judged on the test AUC and IC like any other input.
+- [ ] TiRex-2's 5-session median forecast as one more input of the logistic regression (step 4 of that plan), judged on the test AUC and IC like any other input.

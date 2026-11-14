@@ -1,5 +1,25 @@
 # Project rules
 
+## Plan review debt: check it first
+
+`docs/plans/review-debt.md` lists the open findings of the 2026-11-14 plan review. At the start of any session that touches `docs/plans/` or implements a step of Phase 2 or Phase 3, read it before anything else, tell the user how many items are still open and which ones touch the work at hand, and fix those first (plan, then code). Tick an item with its commit when it is done; delete the file when every item is ticked, and this section with it.
+
+## Research goes to the `researcher` agent
+
+The main session does not search on its own. Every lookup goes to the `researcher` subagent (`.claude/agents/researcher.md`, Haiku 5.5, read-only), which returns a short sourced summary:
+
+- the codebase: architecture, who calls what, where a symbol or file lives, how two parts connect;
+- web search, library or API docs, prices, versions, licences;
+- read-only database queries and other read-only resources (Notion, Lucid, …).
+
+Send independent questions to several researchers in parallel, in one message. Use what a researcher reports; do not repeat its search yourself, and only re-check the single line you are about to rely on or edit.
+
+The main session still does these directly, because a subagent would cost more than it saves:
+
+- reading a file it is about to edit (Edit needs it read), or one exact path it already knows;
+- commands whose output decides the next step: tests, lint, `git status` / `diff` / `log` of its own work, `gh` for its own PR and runs;
+- anything that writes: edits, commits, migrations, workflow changes.
+
 ## Local Postgres: one per worktree, only one running
 
 Every worktree has its own `docker compose` project (named after the folder), but all of them publish `127.0.0.1:5432`, so two can never run together, and a container created while the port was taken has no port mapping at all (`docker ps` shows an empty Ports column, connections are refused).
