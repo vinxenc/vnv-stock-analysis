@@ -1,6 +1,6 @@
 # Phase 2 — Buy / skip decision per symbol (Claude, Jev, TabICL) and a Telegram channel
 
-Status: **draft, not started** (2026-11-14; first draft 2026-10-28 was a market summary, replaced). Comes after [phase-1-sql-screens.md](phase-1-sql-screens.md), which has run green on GitHub since 2026-11-11. Work through the checklist below in order: one step = one PR. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** The TabICL step needs the feature panel of [phase-3-logistic-regression-score.md](phase-3-logistic-regression-score.md) step 1.
+Status: **in progress** (2026-11-14; first draft 2026-10-28 was a market summary, replaced). Step 1 is done (#28); in step 2 the filter job is done (#29); the rest of step 2 and steps 3 to 9 are not started. Comes after [phase-1-sql-screens.md](phase-1-sql-screens.md), which has run green on GitHub since 2026-11-11. Work through the checklist below in order: one step = one PR. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** The TabICL step needs the feature panel of [phase-3-logistic-regression-score.md](phase-3-logistic-regression-score.md) step 1.
 
 ## Goal
 
@@ -65,7 +65,7 @@ Open questions (each blocks the step named):
 
 - [x] `libs/decision/candidates.py`: `MIN_SCORE = 40`; `build_input(report, history_dir)` → the symbols of the `AnalysisReport` with `score >= MIN_SCORE`, in the report's order, each with its last 60 bars from `out/vn_stock_history/<SYMBOL>.json` up to the session, never after; `write_input` / `read_input` for `out/vn_stock_decision_input.json` (`{"session", "symbols"}`, pydantic models). No database.
 - [ ] Next to them, `is_latest_session(engine, t)`: `t == max(date)` in `vn_stock_prices` (see "Decisions"), with its test on the Postgres fixture. Needed by the decide script, not by the filter.
-- [x] `scripts/vn_stock_decision_filter.py <session>`: reads `out/vn_stock_analysis.json` and the history, exits 1 when the report's `as_of` is not `<session>` (the `session` output of `vn_stock_analyze`), writes the input JSON, job summary: counts only (symbols kept of symbols scored).
+- [x] `scripts/vn_stock_decision_filter.py <session>`: reads `out/vn_stock_analysis.json` and the history, exits 6 (`SESSION_MISMATCH` in `libs/constants.py`) when the report's `as_of` is not `<session>` (the `session` output of `vn_stock_analyze`), writes the input JSON, job summary: counts only (symbols kept of symbols scored).
 - [ ] `libs/decision/base.py`: `Decision(decision, probability, reason)` and the interface `Decider` (class attributes `decider` kind and `model_name`; `decide_all(t, candidates) -> dict[symbol, Decision]`) (TabICL scores all candidates in one pass; the API deciders loop inside). Same pattern as `Indicators` in `libs/indicators`.
 - [ ] `scripts/vn_stock_decide.py --decider <name>`: `read_input` (`t` is its `session`) → `is_latest_session`: an older `t` is skipped (exit 0, "stale session, skipped") → no symbol in the file: nothing to do, exit 0 → the decider → in one transaction, delete that model's rows for `t` (its `model_name`) and insert this run's successes. One failed symbol does not stop the others; the script exits non-zero at the end if any failed. Job summary: counts only.
 - [ ] Log through `Logger` (no decisions in the log, see "Decisions"), including the token counts or cost.
@@ -79,7 +79,7 @@ Open questions (each blocks the step named):
 - [ ] `ClaudeDecider`: one call per symbol, structured JSON output `{decision, probability, reason}`. The prompt states the target (+3% in 5 sessions) so the probability means that; judge only from the data given; invent nothing (news, financials, other symbols); report an `unavailable` indicator as such.
 - [ ] Tests with a mocked client: a good answer, a malformed one, a probability out of range, an API error.
 - [ ] **Manual run** against the local database with the user's key (in the shell only): read the answers, adjust the prompt.
-- [ ] Done when: tests pass and a manual run stores N rows.
+- [ ] Done when: tests pass and a manual run stores one row per candidate.
 
 ### 4. Jev decider
 
@@ -88,7 +88,7 @@ Open questions (each blocks the step named):
 - [ ] Tests with a mocked HTTP client: a good answer, a malformed one, an API error.
 - [ ] Manual run with the user's key.
 - [ ] Replace the placeholder step of the `vn_stock_decide_decision_model` job (step 8) with the real run: `scripts/vn_stock_decide.py --decider decision_model` and the Jev key as a secret.
-- [ ] Done when: tests pass, a manual run stores N rows, and the `decision_model` job stores N rows instead of echoing.
+- [ ] Done when: tests pass, a manual run stores one row per candidate, and the `decision_model` job stores them instead of echoing.
 
 ### 5. TabICL decider
 
@@ -98,7 +98,7 @@ Open questions (each blocks the step named):
 - [ ] Measure time and memory on a GitHub runner (4 vCPU, 16 GB) with a `workflow_dispatch` test job; set `timeout-minutes` and the context size from it (open question 3).
 - [ ] Tests: the context never holds a row whose label needs a bar after `t`; a mocked model maps to `Decision`.
 - [ ] Replace the placeholder step of the `vn_stock_decide_tabular` job (step 8) with the real run: `scripts/vn_stock_decide.py --decider tabular`, the `tabicl` dependency group in `setup-env` (review-debt item 10), the checkpoint cache, `DATABASE_URL`, and the `timeout-minutes` measured above.
-- [ ] Done when: the backtest numbers are in this file, one run on the runner fits in its timeout, and the `tabular` job stores N rows instead of echoing.
+- [ ] Done when: the backtest numbers are in this file, one run on the runner fits in its timeout, and the `tabular` job stores one row per candidate instead of echoing.
 
 ### 6. Outcome job
 
@@ -126,11 +126,11 @@ Open questions (each blocks the step named):
 - [ ] All end with the `pipeline-state` action and go into their workflow's `notification` `needs`; none in `vn_stock_screen_done`'s `needs`.
 - [ ] The user adds the five secrets to the `production` environment.
 - [ ] README: files table and job list.
-- [ ] Done when: a real `workflow_dispatch` run stores N rows (Claude only; 2 × N once step 4 replaces the `decision_model` placeholder, 3 × N once step 5 replaces the `tabular` one), the channel gets the message, and a wrong Anthropic key fails only `vn_stock_decide_llm` while the two placeholder jobs still run and the message still arrives with Claude's column empty; then, after the key is fixed, "Re-run failed jobs" on that run fills Claude's rows from the same input artifact and resends the message; a day with a failed `vn_stock_analyze` sends no message; a re-run after a newer session is stored changes nothing ("stale session, skipped"); a day where nobody scores 40 or more stores nothing and sends nothing.
+- [ ] Done when: a real `workflow_dispatch` run stores one row per candidate (Claude's only; Jev's too once step 4 replaces the `decision_model` placeholder, TabICL's too once step 5 replaces the `tabular` one), the channel gets the message, and a wrong Anthropic key fails only `vn_stock_decide_llm` while the two placeholder jobs still run and the message still arrives with Claude's column empty; then, after the key is fixed, "Re-run failed jobs" on that run fills Claude's rows from the same input artifact and resends the message; a day with a failed `vn_stock_analyze` sends no message; a re-run after a newer session is stored changes nothing ("stale session, skipped"); a day where nobody scores 40 or more stores nothing and sends nothing.
 
 ### 9. Measure, then adjust
 
-- [ ] After about 20 sessions with outcomes (about 3 × 20 × 20 = 1,200 rows), one SQL report per decider:
+- [ ] After about 20 sessions with outcomes (3 deciders × 20 sessions × the candidates of a session, which varies with the market), one SQL report per decider:
   - [ ] Hit rate of `buy` against the **base rate** (the share of all decided rows that reached +3%, whatever the decision). A decider is only useful if its buys beat the base rate.
   - [ ] Calibration (bins of stated probability vs measured hit rate) and Brier score.
   - [ ] Against two baselines: "buy every symbol at 40 or more" and "buy the top 5 by score"; and the three deciders against each other on the same rows.

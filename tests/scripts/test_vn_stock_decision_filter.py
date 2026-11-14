@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from libs.analysis.models import AnalysisReport
+from libs.constants import SESSION_MISMATCH
 from libs.decision.candidates import read_input
 from scripts.vn_stock_decision_filter import main
 from tests.libs.decision.fakes import DAY, report, result, write_history
@@ -33,9 +34,23 @@ def test_a_session_that_is_not_the_reports_fails_and_leaves_no_older_output(tmp_
     output.parent.mkdir()
     output.write_text("an older input", encoding="utf-8")
     log = MagicMock()
-    assert main("2026-11-11", analysis_json, history, output, log) == 1
+    assert main("2026-11-11", analysis_json, history, output, log) == SESSION_MISMATCH
     assert not output.exists()
     log.error.assert_called_once()
+
+
+def test_a_candidate_without_a_history_file_is_a_crash_not_a_quiet_exit(tmp_path: Path) -> None:
+    analysis_json, history, output = setup(tmp_path, report(result("HPG", 71.5)))
+    (history / "HPG.json").unlink()
+    with pytest.raises(FileNotFoundError):
+        main(DAY.isoformat(), analysis_json, history, output)
+    assert not output.exists()
+
+
+def test_a_session_that_is_not_a_date_is_a_crash(tmp_path: Path) -> None:
+    analysis_json, history, output = setup(tmp_path, report(result("HPG", 71.5)))
+    with pytest.raises(ValueError):
+        main("yesterday", analysis_json, history, output)
 
 
 def test_nobody_at_the_minimum_writes_an_empty_list(tmp_path: Path) -> None:

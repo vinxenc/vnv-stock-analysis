@@ -188,7 +188,7 @@ jobs:
           name: vn-stock-history
           path: out/vn_stock_history
       - name: Pick the candidates
-        # exits 0 after writing the JSON (an empty list when nobody scores 40), 1 when the analysis is not of the session
+        # exits 0 after writing the JSON (an empty list when nobody scores 40), 6 when the analysis is not of the session
         run: uv run --no-sync python -m scripts.vn_stock_decision_filter "$SESSION"
         env:
           SESSION: ${{ needs.vn_stock_analyze.outputs.session }}

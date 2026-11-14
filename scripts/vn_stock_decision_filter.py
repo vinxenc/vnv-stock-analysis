@@ -5,8 +5,8 @@ Default: out/vn_stock_analysis.json + out/vn_stock_history (the artifacts of `vn
 `vn_stock_get_history`) -> out/vn_stock_decision_input.json. <session> (YYYY-MM-DD) is the day `vn_stock_analyze`
 reports it analysed; it must be the report's `as_of`, so a stale or mixed-up artifact never passes for today's. The
 output holds the symbols scored `MIN_SCORE` or more with their last bars (see `libs/decision/candidates.py`); it is an
-empty list when nobody reaches it. The job summary shows counts only. Exit 0 = written, 1 = <session> is not the
-report's `as_of`, anything else = crash.
+empty list when nobody reaches it. The job summary shows counts only. Exit 0 = written, 6 = <session> is not the
+report's `as_of`, anything else (1 included: a missing history file, a bad date) = crash.
 """
 
 import datetime as dt
@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from libs.analysis.models import AnalysisReport
+from libs.constants import SESSION_MISMATCH
 from libs.decision.candidates import MIN_SCORE, build_input, write_input
 from libs.logger import Logger, LogxideLogger
 
@@ -33,7 +34,7 @@ def main(
     report = AnalysisReport.model_validate_json(analysis_json.read_text(encoding="utf-8"))
     if report.as_of != dt.date.fromisoformat(session):
         log.error("the analysis is of %s, not of the session %s: wrong artifact", report.as_of, session)
-        return 1
+        return SESSION_MISMATCH
     data = build_input(report, history_dir)
     write_input(data, output_json)
     scored = sum(result.score is not None for result in report.symbols)
