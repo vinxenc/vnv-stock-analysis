@@ -1,5 +1,21 @@
 # Project rules
 
+## Research goes to the `researcher` agent
+
+The main session does not search on its own. Every lookup goes to the `researcher` subagent (`.claude/agents/researcher.md`, Haiku 5.5, read-only), which returns a short sourced summary:
+
+- the codebase: architecture, who calls what, where a symbol or file lives, how two parts connect;
+- web search, library or API docs, prices, versions, licences;
+- read-only database queries and other read-only resources (Notion, Lucid, …).
+
+Send independent questions to several researchers in parallel, in one message. Use what a researcher reports; do not repeat its search yourself, and only re-check the single line you are about to rely on or edit.
+
+The main session still does these directly, because a subagent would cost more than it saves:
+
+- reading a file it is about to edit (Edit needs it read), or one exact path it already knows;
+- commands whose output decides the next step: tests, lint, `git status` / `diff` / `log` of its own work, `gh` for its own PR and runs;
+- anything that writes: edits, commits, migrations, workflow changes.
+
 ## Local Postgres: one per worktree, only one running
 
 Every worktree has its own `docker compose` project (named after the folder), but all of them publish `127.0.0.1:5432`, so two can never run together, and a container created while the port was taken has no port mapping at all (`docker ps` shows an empty Ports column, connections are refused).
