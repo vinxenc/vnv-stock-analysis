@@ -1,3 +1,4 @@
+import os
 import sys
 from typing import TextIO
 
@@ -37,3 +38,14 @@ class GithubActionsLogger(Logger):
 
     def error(self, msg: str, *args: object) -> None:
         self._emit("error", msg, args)
+
+
+def job_summary(text: str) -> bool:
+    """Append `text` (Markdown) to the job summary. False outside GitHub Actions ($GITHUB_STEP_SUMMARY is not set):
+    nothing is written, the caller may log it instead."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return False
+    with open(path, "a", encoding="utf-8") as file:
+        file.write(text)
+    return True

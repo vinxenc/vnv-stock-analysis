@@ -1,12 +1,12 @@
 from typing import TYPE_CHECKING
 
 from .base import Logger
-from .github_actions import GithubActionsLogger
+from .github_actions import GithubActionsLogger, job_summary
 
 if TYPE_CHECKING:
     from .logxide import LogxideLogger
 
-__all__ = ["GithubActionsLogger", "Logger", "LogxideLogger"]
+__all__ = ["GithubActionsLogger", "Logger", "LogxideLogger", "job_summary"]
 
 
 def __getattr__(name: str) -> type[Logger]:

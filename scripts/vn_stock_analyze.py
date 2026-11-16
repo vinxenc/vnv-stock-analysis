@@ -15,7 +15,6 @@ Exit 0 = analysed, stored and recorded, 4 = no history file (nothing to analyse)
 
 import csv
 import datetime as dt
-import os
 import sys
 from pathlib import Path
 
@@ -26,10 +25,10 @@ from libs.analysis import scoring, summary
 from libs.analysis.models import AnalysisReport
 from libs.analysis.report import History, build_report
 from libs.constants import NO_DATA
-from libs.db import connect
+from libs.db import connect, upsert
 from libs.db.models import Ranking, ScreenHistory
 from libs.indicators import TalibIndicators
-from libs.logger import Logger, LogxideLogger
+from libs.logger import Logger, LogxideLogger, job_summary
 from scripts.vn_stock_daily_price_store import read_prices
 
 SYMBOLS_CSV = Path("data/hose_symbols.csv")
@@ -70,9 +69,6 @@ def store(report: AnalysisReport, engine: Engine) -> None:
         if result.score  # None (insufficient data) or 0
     ]
     unscored = [result.symbol for result in report.symbols if not result.score]
-    statement = insert(Ranking)
-    keys = Ranking.__table__.primary_key.columns
-    update = {column.key: column for column in statement.excluded if column.key not in keys}
     with engine.begin() as connection:
         connection.execute(
             delete(Ranking).where(
@@ -80,7 +76,7 @@ def store(report: AnalysisReport, engine: Engine) -> None:
             )
         )
         if rows:
-            connection.execute(statement.on_conflict_do_update(index_elements=keys, set_=update), rows)
+            upsert(connection, Ranking, rows)
         connection.execute(insert(ScreenHistory).values(date=report.as_of).on_conflict_do_nothing())
 
 
@@ -101,10 +97,7 @@ def main(
     output_json.parent.mkdir(parents=True, exist_ok=True)
     output_json.write_text(report.model_dump_json(indent=1), encoding="utf-8")
     table = summary.render(report)
-    if os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as file:
-            file.write(table)
-    else:
+    if not job_summary(table):
         log.info("\n%s", table)
     store(report, engine or connect())  # after the summary: a database error must not hide the ranked table
     scored = sum(result.score is not None for result in report.symbols)

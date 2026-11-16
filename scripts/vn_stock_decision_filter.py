@@ -8,13 +8,12 @@ goes into the output as `session`. The output holds the symbols scored `MIN_SCOR
 Exit 0 = written, anything else = crash (a missing file, a history file missing for a candidate).
 """
 
-import os
 import sys
 from pathlib import Path
 
 from libs.analysis.models import AnalysisReport
 from libs.decision.candidates import MIN_SCORE, build_input, write_input
-from libs.logger import Logger, LogxideLogger
+from libs.logger import Logger, LogxideLogger, job_summary
 
 logger = LogxideLogger("vn_stock_decision_filter")
 
@@ -32,9 +31,7 @@ def main(
     write_input(data, output_json)
     scored = sum(result.score is not None for result in report.symbols)
     line = f"Decision input of {report.as_of}: {len(data.symbols)} of {scored} scored symbols at {MIN_SCORE} or more"
-    if os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as file:
-            file.write(line + "\n")
+    job_summary(line + "\n")
     log.info("%s, written to %s", line, output_json)
     return 0
 

@@ -200,8 +200,42 @@ jobs:
           success-message: Picked the candidates for the deciders
           failure-message: Pipeline failed, can not pick the candidates for the deciders
 
+  # The LLM decider (Claude through OpenRouter) answers buy or skip for each candidate; the answers go to
+  # vn_stock_decisions only (the repository is public).
+  # Happy case first (docs/plans/phase-2-llm-decision.md, "Decisions"): no newest-session guard yet, and one failed
+  # symbol fails the job with nothing stored.
+  vn_stock_llm_decision:
+    name: vn stock llm decision
+    needs: vn_stock_decision_filter  # skipped with it
+    runs-on: ubuntu-latest
+    timeout-minutes: 45  # one API call per candidate, 8 at a time, 5 minutes at most each; not measured yet on a real day
+    environment: production  # DATABASE_URL and OPENROUTER_API_KEY are environment secrets, limited to master
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-env
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: vn-stock-decision-input
+          path: out
+      - name: Ask the LLM decider about each candidate
+        # exits 0 after upserting this model's answers of the session (nothing is called or stored without a candidate)
+        run: uv run --no-sync python -m scripts.vn_stock_llm_decision
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LLM_MODEL: anthropic/claude-opus-5.5  # the model id as OpenRouter names it; also the model_name of the rows
+      - if: always()
+        uses: ./.github/actions/pipeline-state
+        with:
+          pipeline: vn_stock_llm_decision
+          job-status: ${{ job.status }}
+          success-message: Stored the LLM decisions of the candidates
+          failure-message: Pipeline failed, can not get or store the LLM decisions
+
   notification:
-    needs: [start-analyze, install, vn_stock_screen, vn_stock_get_history, vn_stock_analyze, vn_stock_decision_filter]  # each job added to this workflow goes here too
+    needs: [start-analyze, install, vn_stock_screen, vn_stock_get_history, vn_stock_analyze, vn_stock_decision_filter, vn_stock_llm_decision]  # each job added to this workflow goes here too
     if: always()  # also after a failed or skipped job: it only reads the state files they wrote
     runs-on: ubuntu-latest
     steps:
