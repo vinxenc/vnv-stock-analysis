@@ -2,12 +2,15 @@
 
 Usage: uv run python -m scripts.vn_stock_analyze [history_dir] [output_json]
 Default: out/vn_stock_history (see vn_stock_get_history) -> out/vn_stock_analysis.json, and the symbols with a score
-above 0 upserted into `vn_stock_rankings` (needs $DATABASE_URL). No network: it reads the history files and
-data/hose_symbols.csv (the listing dates). The history comes from `vn_stock_prices` and is taken as correct: each file
-is ascending by date and ends on the session analysed (the screen already required a bar on it), so nothing is
-re-checked here. A rerun of a session overwrites the row of every symbol it scores again; a symbol that left the
-shortlist keeps its older row. The ranked table goes to $GITHUB_STEP_SUMMARY when it is set, else to the log.
-Exit 0 = analysed and stored, 4 = no history file (nothing to analyse), anything else = crash.
+above 0 upserted into `vn_stock_rankings` and the session recorded in `vn_stock_screen_history`, in one transaction
+(needs $DATABASE_URL). No network: it reads the history files and data/hose_symbols.csv (the listing dates). The history
+comes from `vn_stock_prices` and is taken as correct: each file is ascending by date and ends on the session analysed
+(the screen already required a bar on it), so nothing is re-checked here and the report's `as_of` is the session the
+screen did. A rerun of a session overwrites the row of every symbol it scores again; a symbol that left the shortlist
+keeps its older row. Until the session is recorded it stays due, so a run that failed before this point is redone by
+the next one; recording it twice (two overlapping runs) is harmless. The ranked table goes to $GITHUB_STEP_SUMMARY when
+it is set, else to the log.
+Exit 0 = analysed, stored and recorded, 4 = no history file (nothing to analyse), anything else = crash.
 """
 
 import csv
@@ -24,7 +27,7 @@ from libs.analysis.models import AnalysisReport
 from libs.analysis.report import History, build_report
 from libs.constants import NO_DATA
 from libs.db import connect
-from libs.db.models import Ranking
+from libs.db.models import Ranking, ScreenHistory
 from libs.indicators import TalibIndicators
 from libs.logger import Logger, LogxideLogger
 from scripts.vn_stock_daily_price_store import read_prices
@@ -46,7 +49,9 @@ def read_listed_dates(path: Path = SYMBOLS_CSV) -> dict[str, dt.date]:
 def store(report: AnalysisReport, engine: Engine) -> None:
     """Upsert one row per symbol with a score above 0, keyed on (date, timeframe, symbol): a rerun overwrites the
     symbols it scores again. Insufficient data (null) and 0 points are not stored (the JSON and summary keep them), and
-    a rerun that drops a symbol to null or 0 deletes its older row. Symbols absent from the report keep theirs."""
+    a rerun that drops a symbol to null or 0 deletes its older row. Symbols absent from the report keep theirs. The
+    same transaction records `report.as_of` in the screen history, also when no symbol has a score: the session is done
+    only once its ranking is stored."""
     meta = scoring.metadata()
     rows = [
         {
@@ -76,6 +81,7 @@ def store(report: AnalysisReport, engine: Engine) -> None:
         )
         if rows:
             connection.execute(statement.on_conflict_do_update(index_elements=keys, set_=update), rows)
+        connection.execute(insert(ScreenHistory).values(date=report.as_of).on_conflict_do_nothing())
 
 
 def main(
@@ -84,7 +90,8 @@ def main(
     engine: Engine | None = None,
     log: Logger = logger,
 ) -> int:
-    """Score the history, write the JSON and the job summary, then upsert the scores. Returns the exit code."""
+    """Score the history, write the JSON and the job summary, then upsert the scores and record the session. Returns
+    the exit code."""
     output_json.unlink(missing_ok=True)  # an older analysis must not pass for today's, whatever happens next
     history = load_history(history_dir)
     if not history:

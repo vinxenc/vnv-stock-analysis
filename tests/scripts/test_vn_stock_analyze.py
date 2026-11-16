@@ -18,7 +18,7 @@ from libs.analysis.models import (
     Timeframe,
 )
 from libs.constants import NO_DATA
-from libs.db.models import Ranking
+from libs.db.models import Ranking, ScreenHistory
 from scripts.vn_stock_analyze import load_history, main, read_listed_dates, store
 from tests.libs.analysis.fakes import make_rows
 
@@ -45,6 +45,12 @@ def rankings(engine: Engine) -> list[Ranking]:
     """Every stored row, by date, timeframe and symbol."""
     with Session(engine) as session:
         return list(session.exec(select(Ranking).order_by(Ranking.date, Ranking.timeframe, Ranking.symbol)))
+
+
+def sessions(engine: Engine) -> list[dt.date]:
+    """The screen history: the sessions recorded as done."""
+    with Session(engine) as session:
+        return [row.date for row in session.exec(select(ScreenHistory))]
 
 
 def test_store_writes_one_row_per_scored_symbol_with_the_weights(engine: Engine) -> None:
@@ -84,6 +90,7 @@ def test_a_rerun_that_drops_a_score_to_null_or_0_deletes_its_row(engine: Engine)
         (Timeframe.DAILY, "VCB", 50),
         (Timeframe.WEEKLY, "HPG", 40),
     ]
+    assert sessions(engine) == [DAY]  # recorded once by the three stores (overlapping runs, reruns)
 
 
 def write_history(directory: Path, symbol: str, count: int) -> None:
@@ -173,3 +180,4 @@ def test_real_hpg_and_aam_history_end_to_end(tmp_path: Path, monkeypatch: pytest
     assert close_location["AAM"].status == IndicatorStatus.UNAVAILABLE  # high == low on the last session
     assert all(item.status == IndicatorStatus.UNAVAILABLE for item in aam.indicators if item.id in (5, 7, 17, 24))
     assert rankings(engine) == []  # neither has a score: nothing stored, nothing sent
+    assert sessions(engine) == [report.as_of]  # the session is done all the same, the next run takes the next one
