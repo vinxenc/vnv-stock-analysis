@@ -1,19 +1,39 @@
+import json
 import os
+import time
 
 import niquests
 from pydantic import BaseModel, ValidationError
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exception
 
 from .base import Completion, LLMError, LLMProvider
 
 URL = "https://openrouter.ai/api/v1/chat/completions"
-TIMEOUT = 600  # seconds for one answer: a reasoning model can take minutes
+TIMEOUT = 300  # seconds for one answer, from the request to its last byte: a reasoning model can take minutes
 MAX_TOKENS = 16000  # reasoning included; an answer cut off here fails the schema
 NO_ANSWER = {"error", "content_filter", "length"}  # finish reasons whose content is not an answer
+RETRY_WAIT = 5  # seconds before the one retry, unless the response has a Retry-After
+MAX_RETRY_WAIT = 60  # a longer Retry-After is not worth the job's time
 
 
 class TransientLLMError(LLMError):
-    """A network error, a 429 or a 5xx: worth one more try."""
+    """A network error, or an error whose status or code is 408, 429 or 5xx: worth one more try."""
+
+    def __init__(self, message: str, retry_after: float = RETRY_WAIT) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def is_transient(code: object) -> bool:
+    return isinstance(code, int) and (code in (408, 429) or code >= 500)
+
+
+def retry_wait(header: str | None) -> float:
+    """Seconds to wait from a `Retry-After` header (the seconds form only), between 0 and MAX_RETRY_WAIT."""
+    try:
+        return min(max(float(header), 0), MAX_RETRY_WAIT)
+    except (TypeError, ValueError):  # no header, or the HTTP-date form
+        return RETRY_WAIT
 
 
 class OpenRouter(LLMProvider):
@@ -42,41 +62,63 @@ class OpenRouter(LLMProvider):
                 "provider": {"require_parameters": True},
             }
         )
-        choice = body["choices"][0]
-        content = choice["message"].get("content")
-        if not content or choice.get("finish_reason") in NO_ANSWER:
-            raise LLMError(f"no answer from {model}: finish_reason={choice.get('finish_reason')}")
+        try:
+            choice = body["choices"][0]
+            content = choice["message"].get("content")
+            finish_reason = choice.get("finish_reason")
+        except (LookupError, TypeError, AttributeError) as error:
+            raise LLMError(f"openrouter: unexpected response of {model} ({type(error).__name__})") from None
+        if not content or finish_reason in NO_ANSWER:
+            raise LLMError(f"no answer from {model}: finish_reason={finish_reason}")
         try:
             answer = schema.model_validate_json(content)
         except ValidationError as error:
-            # the fields and what is wrong with them, never their values (pydantic's own message quotes the input)
+            # the declared field and what is wrong with it, never a value (pydantic's own message quotes the input)
+            # and never another location: the name of an extra key is the answer's own text
+            fields = schema.model_fields
             problems = ", ".join(
-                f"{'.'.join(map(str, problem['loc'])) or 'json'}: {problem['type']}"
+                f"{loc[0] if (loc := problem['loc']) and loc[0] in fields else 'answer'}: {problem['type']}"
                 for problem in error.errors(include_input=False, include_url=False)
             )
             raise LLMError(f"the answer of {model} does not fit {schema.__name__} ({problems})") from None
-        usage = body["usage"]
-        return Completion(answer, body.get("model", model), usage["prompt_tokens"], usage["completion_tokens"])
+        usage = body.get("usage")
+        usage = usage if isinstance(usage, dict) else {}  # token counts are for the log: never worth a paid answer
+        return Completion(
+            answer, body.get("model", model), usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
+        )
 
     @retry(
-        retry=retry_if_exception_type(TransientLLMError), stop=stop_after_attempt(2), wait=wait_fixed(5), reraise=True
+        retry=retry_if_exception_type(TransientLLMError),
+        stop=stop_after_attempt(2),
+        wait=wait_exception(lambda error: error.retry_after),
+        reraise=True,
     )
     def _post(self, payload: dict) -> dict:
-        """The JSON body of a successful call. An error can also come with HTTP 200, as an `error` object."""
+        """The JSON object of a successful call. An error is an HTTP status or an `error` object in the body, which
+        OpenRouter also sends with HTTP 200 (an upstream failure): both are read the same way."""
+        deadline = time.monotonic() + TIMEOUT
+        headers = {"Authorization": f"Bearer {self.api_key}"}
         try:
-            response = niquests.post(
-                URL, headers={"Authorization": f"Bearer {self.api_key}"}, json=payload, timeout=TIMEOUT
-            )
+            with niquests.post(URL, headers=headers, json=payload, timeout=TIMEOUT, stream=True) as response:
+                # `timeout` only bounds the wait for the next bytes, so a body that keeps trickling in would never
+                # end: it is read in chunks and cut off at the deadline
+                chunks = []
+                for chunk in response.iter_content():
+                    if time.monotonic() > deadline:
+                        raise TransientLLMError(f"openrouter: no complete answer within {TIMEOUT} s")
+                    chunks.append(chunk)
         except niquests.RequestException as error:
             raise TransientLLMError(f"openrouter: {type(error).__name__}") from None
         status = response.status_code
-        if status == 429 or status >= 500:
-            raise TransientLLMError(f"openrouter: HTTP {status}")
         try:
-            body = response.json()
+            body = json.loads(b"".join(chunks))
         except ValueError:
-            raise LLMError(f"openrouter: HTTP {status}, not JSON") from None
-        if status >= 400 or "error" in body:
-            error = body.get("error") or {}
-            raise LLMError(f"openrouter: HTTP {status}, error {error.get('code')}: {str(error.get('message'))[:200]}")
-        return body
+            body = None
+        error = body.get("error") if isinstance(body, dict) else "the body is not a JSON object"
+        if status < 400 and not error:
+            return body
+        code, detail = (error.get("code"), error.get("message")) if isinstance(error, dict) else (None, error)
+        message = f"openrouter: HTTP {status}, error {code}: {str(detail)[:200]}"
+        if is_transient(status) or is_transient(code):
+            raise TransientLLMError(message, retry_wait(response.headers.get("Retry-After")))
+        raise LLMError(message)

@@ -33,12 +33,14 @@ Decided by the user (2026-11-16), **happy case first**; it overrides the points 
 
 Chosen while building it (2026-11-16, not decided by the user: change if wrong):
 - Also left out, since nothing uses them yet: the handling of one failed symbol (any failure fails the run and nothing is stored) and the two placeholder jobs.
-- Defaults for open question 1, which stays open until the user confirms them on real answers: the model `anthropic/claude-opus-5.5` (OpenRouter's id) with the provider's default reasoning, the reason in Vietnamese.
+- **The model comes from the environment, `$LLM_MODEL`** (user, 2026-11-16), not from a constant in the code: the script reads it and fails when it is not set. The workflow sets it (`anthropic/claude-opus-5.5`, OpenRouter's id), so a model change is a change of the workflow file, with no code change.
+- Defaults for open question 1, which stays open until the user confirms them on real answers: that model with the provider's default reasoning, the reason in Vietnamese.
 - `model_name` is the model id as OpenRouter names it (`anthropic/claude-opus-5.5`), without a provider prefix; the provider and the model that answered go into `input` (recorded, not checked). A later provider that names the same model differently (Anthropic's own id is `claude-opus-5-5`) will need `model_name` as a separate argument of `LlmDecider` to keep one history; not built now.
 - No fallback model (one `model`, never OpenRouter's `models` list), and the request requires a provider that honours the JSON schema (`require_parameters`): on a refusal or an error the run fails; an answer from another model would be stored under this `model_name`.
-- One retry after a network error, a 429 or a 5xx; a 10-minute timeout per call.
-- An error of the provider never quotes the answer (the job log is public): a rejected answer is reported as the fields that failed, without their values.
-- A database error is re-raised as its class and SQLSTATE only: the driver's message quotes the failing row, which would print the decisions in the public job log.
+- One retry after a network error or an error whose HTTP status or code in the body is 408, 429 or 5xx (OpenRouter also reports an upstream failure inside an HTTP 200 body); the wait is the `Retry-After` header, at most 60 s, else 5 s. A 5-minute deadline per call, from the request to the last byte of the answer: the body is read in chunks and cut off there, because the HTTP timeout alone only bounds the wait for the next bytes (a body that keeps trickling in would never end); a cut-off call is retried like a timeout. A response of an unexpected shape is an `LLMError`, and a missing `usage` does not discard a valid answer.
+- The calls run in parallel, 8 at a time (`WORKERS`), so a day with many candidates stays far from the job's 45-minute timeout, which would discard every answer. On the first failure the calls not started yet are cancelled (not paid for); the token totals are logged for the calls that did answer, also when the run fails.
+- An error of the provider never quotes the answer (the job log is public): a rejected answer is reported as the declared fields that failed, without their values; any other location (the name of an extra key is the answer's own text) is reported as `answer`.
+- A database error of any kind (`StatementError`, which also covers a value that cannot be bound) is re-raised as its class and SQLSTATE only: the driver's message quotes the failing row and SQLAlchemy's the parameters, which would print the decisions in the public job log.
 
 Decided by the user (2026-11-14):
 - **Per symbol, independent:** one answer per symbol and decider; no market overview, no comparison between symbols in one answer.
@@ -63,7 +65,7 @@ Decided while writing this plan (change if wrong):
 - Known limits of the label: the decision is made after the close of `t`, so `close(t)` is not a price anyone could still buy at; the label is optimistic by one session's move. Adjusted prices skew an ex-rights week (Phase 1 Notes). A halted symbol with no bar at `t+5` keeps an empty outcome.
 
 Open questions (each blocks the step named):
-1. Claude model (default in the code: `anthropic/claude-opus-5.5` through OpenRouter), its reasoning effort, language of Claude's reason (Vietnamese?). (step 3)
+1. Claude model (`$LLM_MODEL`, set in the workflow to `anthropic/claude-opus-5.5` through OpenRouter), its reasoning effort, language of Claude's reason (Vietnamese?). (step 3)
 2. Jev endpoint: TypeSafe's own API or a reseller (OpenRouter, AI/ML API); the sources disagree on the URL. (step 4)
 3. TabICL version (v2 by default) and the context size (all labelled rows, or the last K sessions), from the time measured on the runner. (step 5)
 4. Message language and layout in Telegram (one line per symbol by default). (step 7)
@@ -91,7 +93,7 @@ Open questions (each blocks the step named):
 
 ### 3. LLM decider (Claude through OpenRouter)
 
-- [ ] Answer open question 1; pick the model and parameters from the current API docs (the `claude-api` skill). Defaults are in the code since 2026-11-16 (see "Decisions"), not confirmed by the user: `anthropic/claude-opus-5.5` through OpenRouter with the default reasoning, the reason in Vietnamese.
+- [ ] Answer open question 1; pick the model and parameters from the current API docs (the `claude-api` skill). Defaults since 2026-11-16 (see "Decisions"), not confirmed by the user: `anthropic/claude-opus-5.5` through OpenRouter (`$LLM_MODEL` in the workflow) with the default reasoning, the reason in Vietnamese.
 - [x] `libs/llm/`: the `LLMProvider` interface and `OpenRouter`, its first implementation (chat completions with a JSON schema `response_format`).
 - [x] `LlmDecider` in `libs/decision/llm.py` (a `BaseDecider`; any model of any `LLMProvider`, so no class named after Claude): one call per symbol, structured JSON output `{decision, probability, reason}` validated against a pydantic model. The prompt states the target (+3% in 5 sessions) so the probability means that; judge only from the data given; invent nothing (news, financials, other symbols); report an `unavailable` indicator as such.
 - [x] `scripts/vn_stock_llm_decision.py`: `read_input` → no symbol: exit 0 → the decider (`LlmDecider` on `OpenRouter` by default; the script itself only knows `BaseDecider`) → upsert the answers on (`date`, `symbol`, `model_name`). Job summary and log: counts and token totals only.
@@ -143,7 +145,7 @@ Open questions (each blocks the step named):
 - [ ] Job `vn_stock_decision_outcome` in `.github/workflows/vn-stock-prices-sync.yml`, `needs: vn_stock_daily_price_store`: it runs right after the bars it needs are stored, every working day, whether or not the analysis screens anything.
 - [ ] No retry workflow: a failed decider is retried with "Re-run failed jobs" on the original run (see "Decisions"; review-debt item 9).
 - [ ] All end with the `pipeline-state` action and go into their workflow's `notification` `needs`.
-- [x] Job `vn_stock_llm_decision` (2026-11-16, the happy case of `vn_stock_decide_llm`): `needs: vn_stock_decision_filter`, downloads the input artifact, `environment: production`, `DATABASE_URL` and `OPENROUTER_API_KEY`, in the `notification` `needs`.
+- [x] Job `vn_stock_llm_decision` (2026-11-16, the happy case of `vn_stock_decide_llm`): `needs: vn_stock_decision_filter`, downloads the input artifact, `environment: production`, `DATABASE_URL` and `OPENROUTER_API_KEY`, `LLM_MODEL` as a plain value, in the `notification` `needs`.
 - [ ] The user adds the four new secrets to the `production` environment (`OPENROUTER_API_KEY`, the Jev key, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`; `DATABASE_URL` is already there). `OPENROUTER_API_KEY` is needed before `vn_stock_llm_decision` is merged: without it the job fails on every run with a candidate.
 - [ ] README: files table and job list.
 - [ ] Done when: a real `workflow_dispatch` run stores one row per candidate (Claude's only; Jev's too once step 4 replaces the `decision_model` placeholder, TabICL's too once step 5 replaces the `tabular` one), the channel gets the message, and a wrong OpenRouter key fails only `vn_stock_decide_llm` while the two placeholder jobs still run and the message still arrives with Claude's column empty; then, after the key is fixed, "Re-run failed jobs" on that run fills Claude's rows from the same input artifact and resends the message; a day with a failed `vn_stock_analyze` sends no message; a re-run after a newer session is stored changes nothing ("stale session, skipped"); a day where nobody scores 40 or more stores nothing and sends nothing.

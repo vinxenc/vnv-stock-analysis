@@ -1,6 +1,7 @@
-"""One paid call to the real API, with $OPENROUTER_API_KEY set:
-`uv run pytest -m live --no-cov -s tests/libs/decision`."""
+"""One paid call to the real API, with $OPENROUTER_API_KEY and $LLM_MODEL set:
+`LLM_MODEL=anthropic/claude-opus-5.5 uv run pytest -m live --no-cov -s tests/libs/decision`."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ pytestmark = pytest.mark.live
 def test_live_one_symbol(tmp_path: Path) -> None:
     write_history(tmp_path, "HPG")
     candidates = build_input(report(result("HPG", 71.5)), tmp_path).symbols
-    decision = LlmDecider(OpenRouter()).decide_all(DAY, candidates)["HPG"]
+    decision = LlmDecider(OpenRouter(), os.environ["LLM_MODEL"]).decide_all(DAY, candidates)["HPG"]
     assert 0 <= decision.probability <= 1
     assert decision.reason
     print(decision.decision, decision.probability, decision.reason, decision.input["answered_by"])

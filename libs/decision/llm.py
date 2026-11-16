@@ -3,6 +3,7 @@ with the probability of buy and a short reason. One call per symbol, the answer 
 
 import datetime as dt
 import json
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 
 from pydantic import field_validator
 
@@ -10,11 +11,11 @@ from libs.analysis.models import Model
 from libs.decision.base import BaseDecider, Decision
 from libs.decision.candidates import Candidate
 from libs.decision.models import Decider, Verdict
-from libs.llm import LLMProvider
+from libs.llm import Completion, LLMProvider
 from libs.logger import Logger, LogxideLogger
 
-MODEL = "anthropic/claude-opus-5.5"  # the id as the provider (OpenRouter) names it
 PROMPT_VERSION = 1  # stored with every answer: bump it whenever SYSTEM or the user message changes
+WORKERS = 8  # calls in flight at once: a day with many candidates must stay far from the job's timeout
 
 SYSTEM = """\
 You judge one stock listed in Vietnam (HOSE) for a short-term screen. The user message is one JSON object: the session \
@@ -52,22 +53,36 @@ class Answer(Model):
 class LlmDecider(BaseDecider):
     kind = Decider.LLM
 
-    def __init__(self, provider: LLMProvider, model: str = MODEL, log: Logger = logger) -> None:
+    def __init__(self, provider: LLMProvider, model: str, log: Logger = logger) -> None:
+        """`model` is the id as the provider names it (`anthropic/claude-opus-5.5` on OpenRouter). It is also the
+        `model_name` of the rows, without a provider prefix: the provider is in `input`."""
         self.provider = provider
-        self.model = model
-        self.model_name = model  # the provider's id of the model, no provider prefix (the provider is in `input`)
+        self.model_name = model
         self.log = log
 
     def decide_all(self, session: dt.date, candidates: list[Candidate]) -> dict[str, Decision]:
-        decisions = {}
-        tokens_in = tokens_out = 0
-        # ponytail: one call at a time (at most the ~90 liquid symbols); a thread pool if it gets slow
-        for candidate in candidates:
-            question = {"session": session.isoformat(), "candidate": candidate.model_dump(mode="json")}
-            completion = self.provider.complete(self.model, SYSTEM, json.dumps(question), Answer)
-            tokens_in += completion.input_tokens
-            tokens_out += completion.output_tokens
-            decisions[candidate.symbol] = Decision(
+        """All or nothing: the first failure is raised once the calls in flight have ended; the calls not started
+        yet are cancelled, so they are not paid for. The token totals of the calls that answered are logged either
+        way."""
+        pool = ThreadPoolExecutor(max_workers=WORKERS)
+        futures = [pool.submit(self._ask, session, candidate) for candidate in candidates]
+        wait(futures, return_when=FIRST_EXCEPTION)
+        pool.shutdown(cancel_futures=True)  # waits for the calls in flight
+        answered = [future.result() for future in futures if not future.cancelled() and not future.exception()]
+        self.log.info(
+            "%s through %s: %d of %d calls answered, %d input tokens, %d output tokens",
+            self.model_name,
+            self.provider.name,
+            len(answered),
+            len(candidates),
+            sum(completion.input_tokens for _, completion in answered),
+            sum(completion.output_tokens for _, completion in answered),
+        )
+        for future in futures:
+            if not future.cancelled():
+                future.result()  # raises the first failure, in the candidates' order
+        return {
+            candidate.symbol: Decision(
                 **completion.answer.model_dump(),
                 input={
                     "prompt_version": PROMPT_VERSION,
@@ -76,12 +91,10 @@ class LlmDecider(BaseDecider):
                     **question,
                 },
             )
-        self.log.info(
-            "%s through %s: %d calls, %d input tokens, %d output tokens",
-            self.model,
-            self.provider.name,
-            len(decisions),
-            tokens_in,
-            tokens_out,
-        )
-        return decisions
+            for candidate, (question, completion) in zip(candidates, answered, strict=True)
+        }
+
+    def _ask(self, session: dt.date, candidate: Candidate) -> tuple[dict, Completion[Answer]]:
+        """The question sent about one candidate and its answer."""
+        question = {"session": session.isoformat(), "candidate": candidate.model_dump(mode="json")}
+        return question, self.provider.complete(self.model_name, SYSTEM, json.dumps(question), Answer)
