@@ -108,6 +108,18 @@ def test_the_default_decider_is_the_llm_on_openrouter_with_the_model_of_the_envi
     assert "0 symbols decided by some/model, 0 buy" in summary.read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("value", [None, ""])  # an unset GitHub variable is an empty string
+def test_a_missing_model_is_refused(
+    tmp_path: Path, engine: Engine, monkeypatch: pytest.MonkeyPatch, value: str | None
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "key")
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    if value is not None:
+        monkeypatch.setenv("LLM_MODEL", value)
+    with pytest.raises(RuntimeError, match="LLM_MODEL is not set"):
+        main(write_candidates(tmp_path), engine)  # also without a candidate
+
+
 def test_the_job_summary_shows_counts_only(tmp_path: Path, engine: Engine, monkeypatch: pytest.MonkeyPatch) -> None:
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
