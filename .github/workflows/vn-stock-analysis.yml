@@ -209,7 +209,7 @@ jobs:
     needs: vn_stock_decision_filter  # skipped with it
     runs-on: ubuntu-latest
     timeout-minutes: 45  # one API call per candidate, 8 at a time, 5 minutes at most each; not measured yet on a real day
-    environment: production  # DATABASE_URL and OPENROUTER_API_KEY are environment secrets, limited to master
+    environment: production  # DATABASE_URL and OPENROUTER_API_KEY are environment secrets, LLM_MODEL an environment variable; limited to master
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -225,7 +225,9 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          LLM_MODEL: anthropic/claude-opus-5.5  # the model id as OpenRouter names it; also the model_name of the rows
+          # a variable of the production environment, not a secret (a secret is masked in the log): the model id as
+          # OpenRouter names it, e.g. anthropic/claude-opus-5.5; also the model_name of the rows
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
       - if: always()
         uses: ./.github/actions/pipeline-state
         with:

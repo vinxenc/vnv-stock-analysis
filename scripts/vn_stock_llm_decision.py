@@ -41,8 +41,11 @@ def main(
 ) -> int:
     """Decide every candidate of the input, then store the answers. Returns the exit code."""
     data = read_input(input_json)
-    # the default reads $OPENROUTER_API_KEY and $LLM_MODEL (the workflow sets it), also on a day without a candidate
-    decider = decider or LlmDecider(OpenRouter(), os.environ["LLM_MODEL"])
+    if decider is None:  # the default reads the environment, also on a day without a candidate
+        model = os.environ.get("LLM_MODEL")  # an unset GitHub variable arrives as an empty string
+        if not model:
+            raise RuntimeError("$LLM_MODEL is not set: the model id as the provider names it")
+        decider = LlmDecider(OpenRouter(), model)
     decisions = decider.decide_all(data.session, data.symbols) if data.symbols else {}
     rows = [
         {
