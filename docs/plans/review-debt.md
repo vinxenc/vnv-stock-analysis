@@ -11,7 +11,7 @@ Verified by the main session: items 10 (`setup-env` and the CI audit) and 12 (21
 ## Gate: settle before starting
 
 - Phase 2 steps 1–4 and 6–7 may start once items 4, 5 and 6 are in the plan (done, `298e9d1`).
-- Phase 2 step 5 (TabICL) and step 9 need items 1, 2, 3 and 8 first (item 9, the retry workflow of step 8, is done).
+- Phase 2 step 5 (TabICL) and step 9 need items 1, 2, 3 and 8 first (item 9, the retry workflow of step 8, is done). Item 1 is done (#33); 2, 3 and 8 are still open. #33 also wrote a reminder into step 9 (a buy threshold on the probability): it records a question for that step and does not start it; the step's text now states this gate.
 - Phase 3 steps 0–2 may start once items 2 and 12 are in the plan; items 3 and 7 before step 3.
 
 ## High
@@ -35,7 +35,7 @@ Verified by the main session: items 10 (`setup-env` and the CI audit) and 12 (21
 - [ ] **11. A wrong outcome is permanent** (`phase-2` step 6, `phase-1-sql-screens.md` Notes). Stored closes are adjusted as of the day stored, so an ex-rights date between `t` and `t+5` gives a fake miss, and the job only touches rows where `hit` is null. The sync starts at 14:45 VN, before the 15:00 close; the label now depends on that bar being final. Fix: leave the outcome null when any one-day change between `t` and `t+5` is beyond ±7% (Phase 3 step 4's rule); spot-check a few stored closes against the final close.
 - [ ] **12. 21 inputs, not 20** (`phase-3` Decisions "Option B", step 3 title, step 4). 24 minus #5 and #17 is 22, #1 and #19 share one value; the table lists 21 columns. Fix: correct "20" everywhere.
 - [ ] **13. Step 5b contradicts per-session standardisation** (`phase-3` Decisions vs step 5b). Inputs are z-scored per session, so there are no "standardisation parameters" to store, and daily scoring needs that day's whole shortlist. Fix: store coefficients only; z-score across the day's shortlist inside `vn_stock_analyze`.
-- [ ] **14. The look-ahead check cannot match exactly** (`phase-3` step 1 vs `SESSIONS = 260` in `scripts/vn_stock_get_history.py`). RSI and PPO are recursive, so "all bars up to t" differs slightly from the live run's last 260 rows; the check only covers sessions since 2026-11-11. Fix: `build_panel` uses the same last-260 window and compares with a tolerance.
+- [ ] **14. The look-ahead check cannot match exactly** (`phase-3` step 1 vs `SESSIONS = 260` in `scripts/vn_stock_get_history.py`). RSI and PPO are recursive, so "all bars up to t" differs slightly from the live run's last 260 rows; the check only covers sessions since 2026-11-11. Fix: `build_panel` uses the same last-260 window and compares with a tolerance. Since #33 the check must also know two forms of indicator 12 in the stored rankings: rows stored before 2026-11-16 have no `up_day` key and hold the gated value in `volume_vs_average` (0 on a session that was not an up day), which equals the `strength` that `up_day_volume_ratio` still returns, so compare that; rows with `up_day` hold the real ratio, so compare the ratio.
 - [ ] **15. Cuts and stale claims:**
   - [x] `phase-2` step 1: the `decider` Postgres enum needs `ALTER TYPE` for the fourth decider already planned; a text column with a CHECK is enough. Done in the plan: `af34bf6`.
   - [x] `phase-2` step 7: the 4096-character split stays. The finding assumed 20 one-line symbols, but the candidates are no longer capped at 20 (every symbol scored 40 or more), so a strong day can pass 4096 characters. Decided in PR #29.

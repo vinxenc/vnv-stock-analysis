@@ -154,6 +154,8 @@ Open questions (each blocks the step named):
 
 ### 9. Measure, then adjust
 
+**Gate** ([review-debt.md](review-debt.md)): this step starts only once items 2, 3 and 8 are settled (item 1 is in the text below since #33): the deciders must be compared on the same population, with a bar that fits `hit_3pct_5`, and TabICL's prerequisites must be decided. The threshold reminder below records a question to answer when the step starts; writing it down did not start the step.
+
 - [ ] After about 20 sessions with outcomes, one SQL report per decider, **as a sanity check only** (review-debt item 1): 20 sessions of overlapping 5-session labels on correlated symbols are about 4 independent periods, not hundreds of observations. Nothing is adjusted or dropped before about 60 sessions. The unit is the session: per session, the hit rate of `buy` minus that session's base rate, with a t-statistic on non-overlapping sessions (every fifth one).
   - [ ] Hit rate of `buy` against the **base rate** (the share of all decided rows that reached +3%, whatever the decision). A decider is only useful if its buys beat the base rate.
   - [ ] Calibration (bins of stated probability vs measured hit rate) and Brier score.
