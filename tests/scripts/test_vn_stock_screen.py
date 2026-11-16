@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 from libs.constants import NO_DATA, NOT_DUE
 from libs.db.models import Price, ScreenHistory
 from scripts import vn_stock_daily_price_store as price_store
-from scripts import vn_stock_screen, vn_stock_screen_done
+from scripts import vn_stock_screen
 from scripts.vn_stock_latest_price_retrieval import read_symbols
 from scripts.vn_stock_screen import MIN_TURNOVER, SESSION_FILE, SESSIONS, main, next_session, screen
 
@@ -199,7 +199,7 @@ def test_next_session_skips_weekends_and_holidays(last: dt.date, expected: dt.da
     assert next_session(last) == expected
 
 
-def test_main_screens_the_day_after_the_history_and_leaves_the_recording_to_the_last_job(
+def test_main_screens_the_day_after_the_history_and_leaves_the_recording_to_the_analysis(
     tmp_path: Path, engine: Engine
 ) -> None:
     assert YESTERDAY.weekday() == 3 and TODAY.weekday() == 4  # Thursday, Friday
@@ -209,9 +209,7 @@ def test_main_screens_the_day_after_the_history_and_leaves_the_recording_to_the_
     assert main(path, engine, TODAY) == 0
     assert read_symbols(path) == ["AAA"]
     assert (tmp_path / SESSION_FILE).read_text(encoding="utf-8") == TODAY.isoformat()
-    assert history(engine) == [YESTERDAY]  # not yet: only vn_stock_screen_done records it
-    vn_stock_screen_done.main(tmp_path / SESSION_FILE, engine)
-    assert history(engine) == [YESTERDAY, TODAY]
+    assert history(engine) == [YESTERDAY]  # not yet: only vn_stock_analyze records it
 
 
 def test_main_has_nothing_to_do_when_the_next_session_is_after_today(tmp_path: Path, engine: Engine) -> None:
@@ -248,8 +246,8 @@ def test_main_catches_up_one_session_at_a_time(tmp_path: Path, engine: Engine) -
     for session_screened, expected in ((TODAY, ["A"]), (monday, ["B"]), (tuesday, ["A", "B"])):
         assert main(path, engine, tuesday) == 0
         assert read_symbols(path) == expected
-        vn_stock_screen_done.main(tmp_path / SESSION_FILE, engine)
-        assert history(engine)[-1] == session_screened
+        assert (tmp_path / SESSION_FILE).read_text(encoding="utf-8") == session_screened.isoformat()
+        screened(engine, session_screened)  # as vn_stock_analyze does once the ranking is stored
     assert main(path, engine, tuesday) == NOT_DUE
 
 

@@ -6,8 +6,8 @@ Default: out/liquid_symbols.csv (a `code` column, same shape as data/hose_symbol
 The session screened is the first working day (weekends and public holidays skipped) after the newest row of
 `vn_stock_screen_history`, not the wall-clock day: a cron run that GitHub delays past midnight (Vietnam time) still
 screens the right session. When that session is after today there is nothing to do yet. An empty history screens today.
-The session screened goes to `screen_session.txt` next to the CSV; the history only gets it from `vn_stock_screen_done`,
-the last job of the workflow, so a run that fails after the screen leaves the session due and the next run redoes it.
+The session screened goes to `screen_session.txt` next to the CSV; the history only gets it from `vn_stock_analyze`,
+with the ranking, so a run that fails before the ranking is stored leaves the session due and the next run redoes it.
 Fails (crash, exit 1) unless the session screened has bars in `vn_stock_prices`: the sync has not finished or failed,
 and old data must not be reported as fresh. Also fails when fewer than MIN_COVERAGE of the previous session's symbols
 have a bar on it: a partial sync would silently shrink the shortlist.
