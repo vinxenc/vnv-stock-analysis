@@ -70,11 +70,18 @@ def test_no_candidate_asks_nobody_and_stores_nothing(tmp_path: Path, engine: Eng
     assert stored(engine) == []
 
 
-def test_a_rerun_replaces_the_rows_of_the_session(tmp_path: Path, engine: Engine) -> None:
-    path = write_candidates(tmp_path, "HPG")
-    main(path, engine, FakeDecider((Verdict.BUY, 0.62)))
-    main(path, None, FakeDecider((Verdict.SKIP, 0.3)))  # no engine given: the one of $DATABASE_URL
-    assert [(row[1], row[4], row[5]) for row in stored(engine)] == [("HPG", "skip", 0.3)]
+def test_a_rerun_upserts(tmp_path: Path, engine: Engine) -> None:
+    main(write_candidates(tmp_path, "HPG", "FPT"), engine, FakeDecider((Verdict.BUY, 0.62), (Verdict.BUY, 0.7)))
+    with engine.begin() as connection:  # as if the outcome job and a day had passed
+        connection.execute(text("UPDATE vn_stock_decisions SET hit = true, return_5 = 0.05, created_at = '2026-01-01'"))
+    main(write_candidates(tmp_path, "HPG"), None, FakeDecider((Verdict.SKIP, 0.3)))  # no engine: $DATABASE_URL's
+    columns = "symbol, decision, probability, hit, return_5, created_at > '2026-01-02'"
+    with engine.connect() as connection:
+        rows = [tuple(row) for row in connection.execute(text(f"SELECT {columns} FROM vn_stock_decisions ORDER BY 1"))]
+    assert rows == [
+        ("FPT", "buy", 0.7, True, 0.05, False),  # not answered again: its older row stays as it was
+        ("HPG", "skip", 0.3, None, None, True),  # answered again: new answer, new created_at, outcome emptied
+    ]
 
 
 def test_a_failing_decider_crashes_and_stores_nothing(tmp_path: Path, engine: Engine) -> None:

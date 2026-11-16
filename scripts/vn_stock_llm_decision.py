@@ -3,8 +3,9 @@
 Usage: uv run python -m scripts.vn_stock_llm_decision [input_json]
 Default: out/vn_stock_decision_input.json (what `vn_stock_decision_filter` wrote). Needs $DATABASE_URL and
 $OPENROUTER_API_KEY: the decider is `LlmDecider` on the `OpenRouter` provider (`libs/decision/llm.py`, `libs/llm/`);
-the script itself only knows the `BaseDecider` interface. One API call per candidate, then one transaction: this
-model's rows of the session are deleted and the answers inserted into `vn_stock_decisions`, so a rerun replaces them.
+the script itself only knows the `BaseDecider` interface. One API call per candidate, then one upsert into
+`vn_stock_decisions`, keyed on (date, symbol, model_name): a rerun overwrites the symbols it answers again, with a new
+`created_at` and an empty outcome; a symbol it does not answer keeps its older row.
 No candidate: nothing is called or stored. The decisions go to the database only: the job summary and the log show
 counts and token totals (the repository is public).
 Not built yet (docs/plans/phase-2-llm-decision.md, "Decisions"): the newest-session guard, so a late run decides an
@@ -16,7 +17,8 @@ import os
 import sys
 from pathlib import Path
 
-from sqlalchemy import Engine, delete, insert
+from sqlalchemy import Engine
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 
 from libs.db import connect
@@ -52,14 +54,14 @@ def main(
         for symbol, decision in decisions.items()
     ]
     if rows:  # after every call: a failed call leaves the stored rows as they were
+        statement = insert(DecisionRecord)
+        keys = DecisionRecord.__table__.primary_key.columns
+        # every other column, also the ones not in `rows`: `excluded` then holds their default, so an overwritten
+        # row gets a new created_at and an empty outcome
+        update = {column.key: column for column in statement.excluded if column.key not in keys}
         try:
             with (engine or connect()).begin() as connection:
-                connection.execute(
-                    delete(DecisionRecord).where(
-                        DecisionRecord.date == data.session, DecisionRecord.model_name == decider.model_name
-                    )
-                )
-                connection.execute(insert(DecisionRecord), rows)
+                connection.execute(statement.on_conflict_do_update(index_elements=keys, set_=update), rows)
         except DBAPIError as error:
             # the driver's message quotes the failing row and SQLAlchemy's the parameters: neither may reach the
             # public job log, so only the error class and the SQLSTATE are kept (`from None` drops the original)

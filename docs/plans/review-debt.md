@@ -6,7 +6,7 @@ Open findings from the review of the plans on 2026-11-14 (a read-only review by 
 
 Verified by the main session: items 10 (`setup-env` and the CI audit) and 12 (21 columns). The others are the reviewer's, checked against the files by the reviewer, not yet re-checked.
 
-**Not in the code yet (2026-11-16):** items 4 and 6 are ticked because the plan has the `is_latest_session` guard, but `vn_stock_llm_decision` ships without it (user decision, happy case first; `phase-2-llm-decision.md`, "Decisions"). Until the guard is built, a late run decides an older session and a re-run can rewrite a decision after its outcome is known.
+**Not in the code yet (2026-11-16):** items 4 and 6 are ticked because the plan has the `is_latest_session` guard, but `vn_stock_llm_decision` ships without it (user decision, happy case first; `phase-2-llm-decision.md`, "Decisions"). Until the guard is built, a late run decides an older session and a re-run can rewrite a decision after its outcome is known (the store is an upsert since #31, not delete-then-insert: a re-run still overwrites every symbol it answers again, so item 4 stands as written).
 
 ## Gate: settle before starting
 

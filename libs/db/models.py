@@ -67,7 +67,7 @@ def _one_of(column: str, values: type[Decider] | type[Verdict]) -> str:
 
 class DecisionRecord(SQLModel, table=True):
     """One answer of one decider about one symbol of one session (buy or skip, with the probability of buy), and
-    its outcome five sessions later. A model's rows for a session are replaced by its latest run. `decider` (the kind
+    its outcome five sessions later. A rerun upserts: it overwrites the rows it answers again. `decider` (the kind
     of model) and `decision` are text with a CHECK on `Decider` and `Verdict`, `probability` has one between 0 and 1
     (`CLAUDE.md`: `alembic check` does not compare CHECK constraints, so a test tries a bad value). `model_name` says
     which model answered and has no CHECK, so a new model of a known kind needs no migration."""

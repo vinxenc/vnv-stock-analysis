@@ -220,7 +220,7 @@ jobs:
           name: vn-stock-decision-input
           path: out
       - name: Ask the LLM decider about each candidate
-        # exits 0 after replacing this model's rows of the session (nothing is called or stored without a candidate)
+        # exits 0 after upserting this model's answers of the session (nothing is called or stored without a candidate)
         run: uv run --no-sync python -m scripts.vn_stock_llm_decision
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
