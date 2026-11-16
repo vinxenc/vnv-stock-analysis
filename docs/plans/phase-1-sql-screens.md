@@ -135,7 +135,7 @@ The score is a **screening score**, not a buy recommendation. Every number below
 | | 9 | MACD histogram > 0 | PPO histogram, 0 → +0.5% | 4 | A | 70 |
 | | 10 | MACD histogram rising | change vs 3 sessions ago, 0 → +0.3% | 3 | A | 55 |
 | | 11 | MACD fresh bullish cross | only while the histogram is > 0; full if crossed within 1 session, 0 after 6 | 2 | A | 70 |
-| **Money flow (25)** | 12 | Volume vs 20-session average, up days only | 1× → 2× (0 on a down day) | 8 | A | 21 |
+| **Money flow (25)** | 12 | Volume vs 20-session average, up days only (the output shows the real ratio as `volume_vs_average` and `up_day`) | 1× → 2× (0 on a down day) | 8 | A | 21 |
 | | 13 | Up-volume / down-volume over 20 sessions | 1× → 2×; full points when there was no down-volume | 7 | A | 21 |
 | | 14 | Turnover: 5-session average / 20-session average | 1× → 1.5× | 5 | A | 21 |
 | | 15 | Close location in the day's range | (close − low) / (high − low), 0.5 → 0.9; unavailable when high = low (locked at the ceiling or floor) | 5 | A | 1 |
@@ -265,6 +265,10 @@ From a `/ponytail-review` of these plans on 2026-10-28. Outcome (2026-11-10): #2
 8. **Dropped:** the `session_date` job output; the session is simply today (VN).
 
 ## Notes
+
+**Indicator 12's raw value** (2026-11-16): `volume_vs_average` in the output is the real ratio on every session, with `up_day` (1 or 0) next to it; the points still count only on an up day. Until then the raw value itself was 0 on a session that was not an up day, which the Phase 2 LLM read as "no volume". Rankings stored before that date keep the old meaning (they have no `up_day` key). Phase 3 must choose which of the two it feeds its models.
+
+**A mixed adjustment seen in production** (2026-11-16, VPI): the stored bars of 2026-10-28 to 2026-11-06 are about 10% above the bars around them (a +12.5% and a −10.6% one-day change, beyond the ±7% band), which looks like an ex-rights adjustment applied to some bars only; not checked against the corporate action. Its volatility (#20) and distance to the high (#16, #17) were wrong that day, and the LLM's reason quoted both. See the ±7% item above and review-debt item 11.
 
 ### Adjusted prices skew the history
 
