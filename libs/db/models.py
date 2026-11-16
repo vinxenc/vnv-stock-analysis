@@ -83,7 +83,7 @@ class DecisionRecord(SQLModel, table=True):
     symbol: str = Field(primary_key=True)
     model_name: str = Field(
         primary_key=True
-    )  # "provider/model", e.g. "anthropic/claude-opus-5-5"; determines `decider`
+    )  # "provider/model", e.g. "anthropic/claude-opus-5.5"; determines `decider`
     decider: str = Field(sa_type=Text)
     decision: str = Field(sa_type=Text)
     probability: float  # of buy

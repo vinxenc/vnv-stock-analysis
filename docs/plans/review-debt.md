@@ -6,6 +6,8 @@ Open findings from the review of the plans on 2026-11-14 (a read-only review by 
 
 Verified by the main session: items 10 (`setup-env` and the CI audit) and 12 (21 columns). The others are the reviewer's, checked against the files by the reviewer, not yet re-checked.
 
+**Not in the code yet (2026-11-16):** items 4 and 6 are ticked because the plan has the `is_latest_session` guard, but `vn_stock_llm_decision` ships without it (user decision, happy case first; `phase-2-llm-decision.md`, "Decisions"). Until the guard is built, a late run decides an older session and a re-run can rewrite a decision after its outcome is known.
+
 ## Gate: settle before starting
 
 - Phase 2 steps 1–4 and 6–7 may start once items 4, 5 and 6 are in the plan (done, `298e9d1`).
@@ -37,8 +39,8 @@ Verified by the main session: items 10 (`setup-env` and the CI audit) and 12 (21
 - [ ] **15. Cuts and stale claims:**
   - [x] `phase-2` step 1: the `decider` Postgres enum needs `ALTER TYPE` for the fourth decider already planned; a text column with a CHECK is enough. Done in the plan: `af34bf6`.
   - [x] `phase-2` step 7: the 4096-character split stays. The finding assumed 20 one-line symbols, but the candidates are no longer capped at 20 (every symbol scored 40 or more), so a strong day can pass 4096 characters. Decided in PR #29.
-  - [ ] `phase-2` Decisions: the ranked table and the `vn-stock-analysis` artifact are already public (`vn-stock-analysis.yml`), so only buy / skip is hidden; say so.
-  - [ ] `phase-2` step 8: four new secrets, not five (`DATABASE_URL` exists).
+  - [x] `phase-2` Decisions: the ranked table and the `vn-stock-analysis` artifact are already public (`vn-stock-analysis.yml`), so only buy / skip is hidden; say so. Done in the plan: the PR of `vn_stock_llm_decision`.
+  - [x] `phase-2` step 8: four new secrets, not five (`DATABASE_URL` exists). Done in the plan: the PR of `vn_stock_llm_decision`.
   - [x] `README.md` (row of `vn_stock_analyze`) and `libs/analysis/models.py` (docstring) still say Phase 2 reads the JSON. It is true again: the filter job of Phase 2 reads `out/vn_stock_analysis.json` (plan, `5cfd154`); only the README row needs a mention of the filter in step 8.
 
 ## Not verified by anyone yet
