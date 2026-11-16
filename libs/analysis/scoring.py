@@ -15,7 +15,7 @@ from libs.analysis.gates import uptrend_gate
 from libs.analysis.models import IndicatorResult, IndicatorStatus, Theme
 from libs.indicators import Indicators
 
-Raw = float | Detection | None  # a number, what a shape feature found (#22-#24), or None = cannot be computed
+Raw = float | Detection | None  # a number, a strength with its facts (#12, #22-#24), or None = cannot be computed
 Feature = Callable[[Candles, Indicators], Raw]  # candles and the engine -> raw
 
 
@@ -58,7 +58,7 @@ def metadata() -> dict:
     }
 
 
-def pure(feature: Callable[[Candles], float | None]) -> Feature:
+def pure(feature: Callable[[Candles], Raw]) -> Feature:
     """A feature that only looks at the candles: drop the engine argument the runner passes."""
     return lambda candles, _engine: feature(candles)
 
@@ -142,7 +142,7 @@ def score_indicators(raw: dict[int, Raw], ranks: dict[int, float]) -> list[Indic
             results.append(_result(indicator, gate, raw={"sma50_change": sma50_change}))
         else:
             number, details = (value.strength, value.details) if isinstance(value, Detection) else (value, {})
-            facts = {indicator.raw_name: number, **details}
+            facts = {indicator.raw_name: number, **details}  # a detail of that name replaces the strength (#12)
             if indicator.rank is None:
                 share = indicator.curve(number)
             else:

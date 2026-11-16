@@ -3,7 +3,7 @@
 import pytest
 
 from libs.analysis import features
-from libs.analysis.features import Candles
+from libs.analysis.features import Candles, Detection
 from libs.db.models import Price
 from libs.indicators import TalibIndicators
 
@@ -94,8 +94,9 @@ def test_ppo_cross_age_is_the_cap_while_the_histogram_is_not_positive() -> None:
 def test_up_day_volume_ratio() -> None:
     up = candles([10, 10, 11], volume=[100, 100, 200])  # prior 2 sessions average 100
     down = candles([10, 11, 10], volume=[100, 100, 200])
-    assert features.up_day_volume_ratio(up, window=2) == 2.0
-    assert features.up_day_volume_ratio(down, window=2) == 0.0
+    assert features.up_day_volume_ratio(up, window=2) == Detection(2.0, {"volume_vs_average": 2.0, "up_day": 1.0})
+    # not an up day: no strength, but the output still gets the real ratio, never a 0 that reads as "no volume"
+    assert features.up_day_volume_ratio(down, window=2) == Detection(0.0, {"volume_vs_average": 2.0, "up_day": 0.0})
     assert features.up_day_volume_ratio(candles([10, 10, 11], volume=[0, 0, 5]), window=2) is None
 
 

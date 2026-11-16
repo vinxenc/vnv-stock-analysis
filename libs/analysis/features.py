@@ -27,7 +27,8 @@ CROSS_AGE_CAP = 6.0  # a MACD cross older than this scores nothing, so the age s
 
 @dataclass(frozen=True)
 class Detection:
-    """What a shape feature (#22-#24) found: its strength, 0..1, and the facts behind it for the output."""
+    """What a feature found beyond one number: the strength the curve scores (0..1 for the shapes #22-#24) and the
+    facts behind it for the output. A fact named like the indicator replaces the strength in the output (#12)."""
 
     strength: float
     details: dict[str, float | int | str | None] = field(default_factory=dict)
@@ -125,12 +126,16 @@ def ppo_cross_age(candles: Candles, engine: Indicators) -> float:
 # Money flow (#12-#15)
 
 
-def up_day_volume_ratio(candles: Candles, window: int = 20) -> float | None:
-    """#12: today's volume / average volume of the `window` sessions before today; 0 when today is not an up day."""
+def up_day_volume_ratio(candles: Candles, window: int = 20) -> Detection | None:
+    """#12: today's volume / average volume of the `window` sessions before today, which counts only on an up day: the
+    strength is that ratio, or 0 when today is not an up day. The output shows the real ratio (`volume_vs_average`)
+    and `up_day` instead of the strength, so a 0 is never read as "no volume"."""
     average = mean(candles.volume[-1 - window : -1])
     if average == 0:
         return None
-    return candles.volume[-1] / average if _is_up(candles, len(candles) - 1) else 0.0
+    ratio = candles.volume[-1] / average
+    up = _is_up(candles, len(candles) - 1)
+    return Detection(ratio if up else 0.0, {"volume_vs_average": ratio, "up_day": float(up)})
 
 
 def up_down_volume_ratio(candles: Candles, window: int = 20) -> float | None:

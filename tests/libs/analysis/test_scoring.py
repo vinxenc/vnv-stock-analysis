@@ -103,6 +103,19 @@ def test_score_indicators() -> None:
     assert len(results) == 24
 
 
+def test_volume_counts_only_on_an_up_day_but_the_output_always_shows_the_real_ratio() -> None:
+    def volume(ratio: float, up: bool) -> IndicatorResult:
+        raw: dict[int, float | Detection | None] = {indicator.id: None for indicator in INDICATORS}
+        raw[12] = Detection(ratio if up else 0.0, {"volume_vs_average": ratio, "up_day": float(up)})
+        return {result.id: result for result in scoring.score_indicators(raw, {})}[12]
+
+    up_day, down_day = volume(1.5, up=True), volume(1.5, up=False)
+    assert up_day.points == pytest.approx(4.0)  # 8 x half of the 1x -> 2x ramp
+    assert up_day.raw == {"volume_vs_average": 1.5, "up_day": 1.0}
+    assert down_day.points == 0
+    assert down_day.raw == {"volume_vs_average": 1.5, "up_day": 0.0}  # the ratio, not the 0 the score used
+
+
 def test_the_engine_is_injected_not_imported() -> None:
     """Swapping the library is passing another `Indicators`: RSI #8 and the SMA gap #1 follow the engine given."""
     flat = candles(60)

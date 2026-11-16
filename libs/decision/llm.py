@@ -14,7 +14,7 @@ from libs.decision.models import Decider, Verdict
 from libs.llm import Completion, LLMProvider
 from libs.logger import Logger, LogxideLogger
 
-PROMPT_VERSION = 1  # stored with every answer: bump it whenever SYSTEM or the user message changes
+PROMPT_VERSION = 2  # stored with every answer: bump it whenever SYSTEM or the user message changes (2: #12's raw)
 WORKERS = 8  # calls in flight at once: a day with many candidates must stay far from the job's timeout
 
 SYSTEM = """\
