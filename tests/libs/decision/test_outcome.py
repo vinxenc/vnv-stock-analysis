@@ -124,13 +124,35 @@ def test_a_session_missing_for_every_symbol_waits_until_it_is_stored(engine: Eng
     missed = path(*[20.0] * len(S))
     del missed[S[2]]  # the sync missed S[2]: the stored dates alone would make S[6] the fifth session
     bars(engine, "MARKET", missed)
-    bars(engine, "HPG", missed | {S[5]: 21.0, S[6]: 30.0})
+    bars(engine, "HPG", missed | {S[5]: 21.0, S[6]: 21.2})  # within MAX_MOVE: only the calendar check stops it
     decide(engine, "HPG")
     assert fill(engine) == (0, 1)
     bars(engine, "MARKET", {S[2]: 20.0})  # stored later (a backfill)
     bars(engine, "HPG", {S[2]: 20.0})
     assert fill(engine) == (1, 0)
     assert outcomes(engine) == [("HPG", "fake/model", 0.05, True)]  # t+5 is S[5], not S[6]
+
+
+def test_a_session_stored_during_the_run_is_left_for_the_next_run(engine: Engine) -> None:
+    missed = path(*[20.0] * 6)
+    del missed[S[2]]  # missed by the sync; the newest stored session is S[5]
+    bars(engine, "MARKET", missed)
+    bars(engine, "HPG", missed)
+    decide(engine, "HPG")
+    stored = []
+
+    def sync_commits_a_session(day: dt.date) -> bool:  # runs between the range query and the UPDATE
+        if not stored:
+            bars(engine, "MARKET", {S[6]: 20.0})  # its own connection: committed, visible to the UPDATE
+            bars(engine, "HPG", {S[6]: 21.0})
+            stored.append(S[6])
+        return day.weekday() < 5
+
+    with engine.begin() as connection:
+        # without the bound, S[6] would be the fifth stored date after S[0] and the calendar, built up to S[5], would
+        # count only five working days: the row would be filled from a six-session window
+        assert fill_outcomes(connection, sync_commits_a_session) == (0, 0)
+    assert outcomes(engine) == [("HPG", "fake/model", None, None)]
 
 
 def test_a_holiday_is_not_a_missing_session(engine: Engine) -> None:

@@ -36,6 +36,7 @@ due AS (
     FROM pending
     JOIN sessions s_start ON s_start.date = pending.date
     JOIN sessions s_end ON s_end.n = s_start.n + :horizon
+    WHERE s_end.date <= CAST(:last AS date)  -- a session stored after _RANGE is beyond the calendar: a later run's
 ),
 bars AS (
     SELECT symbol, date, close, close / lag(close) OVER (PARTITION BY symbol ORDER BY date) - 1 AS change
@@ -80,6 +81,7 @@ def fill_outcomes(connection: Connection, is_working_day: Callable[[dt.date], bo
         "max_move": MAX_MOVE,
         "target": TARGET,
         "working_days": [day for day in days if is_working_day(day)],
+        "last": last,
     }
     filled, due = connection.execute(_FILL, params).one()
     return filled, due - filled
