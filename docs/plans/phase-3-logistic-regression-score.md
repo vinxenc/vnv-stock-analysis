@@ -48,6 +48,7 @@ Replays `libs/analysis` on every past session: for session t, only the bars up t
 
 - [ ] #22 and #23 carry their raw strength even when the uptrend gate blocks their points, so the model can learn whether the gate matters.
 - [ ] Empty cell = cannot be computed. Labels empty for the last 5 sessions (not used for training).
+- [ ] The forward labels use `HORIZON`, `TARGET` and the market calendar of `libs/decision/outcome.py` (Phase 2 step 6: `t+5` is the fifth distinct date after `t` in `vn_stock_prices`), not a definition of their own; a test checks that `hit_3pct_5` equals the stored `hit` of `vn_stock_decisions` on the same rows.
 - [ ] Raw values in the file, no z-score (the same file serves logistic, linear or anything else).
 - [ ] **Look-ahead check:** for every session that has rows in `vn_stock_rankings`, the exported raw values equal the stored ones (`indicators[*].raw`; a gated #22 / #23 stores only `sma50_change`, so skip those). Any difference is a bug to fix before going on.
 - [ ] Sanity: the share of `beat_median = 1` is about 50% every session; row count about 34,000. Record the share of `hit_3pct_5 = 1` (the base rate Phase 2's buys must beat).

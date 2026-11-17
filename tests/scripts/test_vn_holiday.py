@@ -22,6 +22,7 @@ def test_exit_code(arg: str, code: int) -> None:
     [
         (date(2026, 10, 23), False),  # Fri, normal day
         (date(2026, 10, 24), True),  # Sat
+        (date(2026, 1, 2), True),  # exchange closed, not in the `holidays` package
         (date(2026, 2, 17), True),  # Tết (lunar)
         (date(2026, 4, 27), True),  # Giỗ Tổ nghỉ bù (26/4 is a Sunday)
         (date(2026, 8, 31), True),  # swap day for 22/8
