@@ -1,8 +1,12 @@
 """The outcome of a decision, defined once (docs/plans/phase-2-llm-decision.md, step 6; Phase 3 reuses it).
 
 `t+HORIZON` is the HORIZON-th market session after `t`: the HORIZON-th distinct date after `t` in `vn_stock_prices`, all
-symbols. A buy is right when `close(t+HORIZON) >= close(t) * (1 + TARGET)`.
+symbols. `hit` is set for every decision, buy or skip: true when `close(t+HORIZON) >= close(t) * (1 + TARGET)`, i.e. the
+price reached the target, not "the decision was right".
 """
+
+import datetime as dt
+from collections.abc import Callable
 
 from sqlalchemy import Connection, text
 
@@ -10,9 +14,15 @@ HORIZON = 5
 TARGET = 0.03
 MAX_MOVE = 0.075  # beyond HOSE's ±7% band (with a margin to keep a ceiling close): an ex-rights date, adjusted prices
 
+_RANGE = text(
+    "SELECT (SELECT min(date) FROM vn_stock_decisions WHERE hit IS NULL), (SELECT max(date) FROM vn_stock_prices)"
+)
+
 # A row is filled only when the symbol has a bar on t and on each of the HORIZON sessions after it, none of them moving
-# beyond MAX_MOVE from the bar before: counting those bars in (t, t+HORIZON] checks both at once. The return is computed
-# in numeric, so an exact +3% is a hit and `return_5` and `hit` cannot disagree.
+# beyond MAX_MOVE from the bar before: counting those bars in (t, t+HORIZON] checks both at once. The working days of
+# the holiday calendar in (t, t+HORIZON] must number HORIZON too: a session the sync missed for every symbol is absent
+# from the stored dates, which would stretch the window to six sessions. The return is computed in numeric, so an exact
+# +3% is a hit and `return_5` and `hit` cannot disagree.
 _FILL = text("""
 WITH pending AS (
     SELECT date, symbol, model_name FROM vn_stock_decisions WHERE hit IS NULL
@@ -41,6 +51,10 @@ outcome AS (
         WHERE bars.symbol = due.symbol AND bars.date > due.date AND bars.date <= due.t_end
           AND abs(bars.change) <= :max_move
     ) = :horizon
+    AND (
+        SELECT count(*) FROM unnest(CAST(:working_days AS date[])) AS working(day)
+        WHERE working.day > due.date AND working.day <= due.t_end
+    ) = :horizon
 ),
 filled AS (
     UPDATE vn_stock_decisions AS d
@@ -53,7 +67,19 @@ SELECT (SELECT count(*) FROM filled) AS filled, (SELECT count(*) FROM due) AS du
 """)
 
 
-def fill_outcomes(connection: Connection) -> tuple[int, int]:
-    """Fill `return_5` and `hit` of every decision whose outcome is known. Returns (filled, due but left empty)."""
-    filled, due = connection.execute(_FILL, {"horizon": HORIZON, "max_move": MAX_MOVE, "target": TARGET}).one()
+def fill_outcomes(connection: Connection, is_working_day: Callable[[dt.date], bool]) -> tuple[int, int]:
+    """Fill `return_5` and `hit` of every decision whose outcome is known. Returns (filled, due but left empty).
+
+    `is_working_day` is the holiday calendar (the script passes `scripts.vn_holiday`'s); it only guards against a
+    missing session: t+HORIZON itself is counted in the stored dates.
+    """
+    first, last = connection.execute(_RANGE).one()
+    days = [first + dt.timedelta(days=i) for i in range((last - first).days + 1)] if first and last else []
+    params = {
+        "horizon": HORIZON,
+        "max_move": MAX_MOVE,
+        "target": TARGET,
+        "working_days": [day for day in days if is_working_day(day)],
+    }
+    filled, due = connection.execute(_FILL, params).one()
     return filled, due - filled

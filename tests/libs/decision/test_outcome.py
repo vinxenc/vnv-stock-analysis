@@ -43,9 +43,10 @@ def outcomes(engine: Engine) -> list[tuple]:
         return [tuple(row) for row in connection.execute(text(query))]
 
 
-def fill(engine: Engine) -> tuple[int, int]:
+def fill(engine: Engine, days_off: tuple[dt.date, ...] = ()) -> tuple[int, int]:
+    """`days_off`: holidays on top of the weekends."""
     with engine.begin() as connection:
-        return fill_outcomes(connection)
+        return fill_outcomes(connection, lambda day: day.weekday() < 5 and day not in days_off)
 
 
 @pytest.fixture
@@ -117,6 +118,29 @@ def test_a_missing_bar_in_between_leaves_the_outcome_empty(market: Engine) -> No
     bars(market, "HPG", closes)
     decide(market, "HPG")
     assert fill(market) == (0, 1)
+
+
+def test_a_session_missing_for_every_symbol_waits_until_it_is_stored(engine: Engine) -> None:
+    missed = path(*[20.0] * len(S))
+    del missed[S[2]]  # the sync missed S[2]: the stored dates alone would make S[6] the fifth session
+    bars(engine, "MARKET", missed)
+    bars(engine, "HPG", missed | {S[5]: 21.0, S[6]: 30.0})
+    decide(engine, "HPG")
+    assert fill(engine) == (0, 1)
+    bars(engine, "MARKET", {S[2]: 20.0})  # stored later (a backfill)
+    bars(engine, "HPG", {S[2]: 20.0})
+    assert fill(engine) == (1, 0)
+    assert outcomes(engine) == [("HPG", "fake/model", 0.05, True)]  # t+5 is S[5], not S[6]
+
+
+def test_a_holiday_is_not_a_missing_session(engine: Engine) -> None:
+    closes = path(*[20.0] * len(S))
+    del closes[S[2]]  # a day off: no bar for anyone
+    bars(engine, "MARKET", closes)
+    bars(engine, "HPG", closes | {S[6]: 21.0})
+    decide(engine, "HPG")
+    assert fill(engine, days_off=(S[2],)) == (1, 0)
+    assert outcomes(engine) == [("HPG", "fake/model", 0.05, True)]  # S[6] is the fifth session after S[0]
 
 
 def test_every_model_of_a_symbol_gets_the_outcome(market: Engine) -> None:
