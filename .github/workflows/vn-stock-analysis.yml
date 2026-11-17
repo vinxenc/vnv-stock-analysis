@@ -91,6 +91,34 @@ jobs:
           failure-message: Pipeline failed, can not screen the liquid symbols (stale prices or none liquid)
           success-level: ${{ steps.screen.outputs.screened == 'true' && 'info' || 'warning' }}
 
+  # Fills the outcome (return_5, hit) of every stored decision whose fifth market session is now in vn_stock_prices
+  # (docs/plans/phase-2-llm-decision.md, step 6). Beside the screen: it needs only the stored prices. t+5 is counted in
+  # the distinct dates of vn_stock_prices, never in calendar days, so holidays and a late run (any session still due)
+  # are covered; a row whose fifth session is not stored yet waits for a later run.
+  vn_stock_decision_outcome:
+    name: vn stock decision outcome
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # one UPDATE; the script has its own database timeouts
+    environment: production  # DATABASE_URL is an environment secret, limited to master
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-env
+      - name: Fill the outcomes that are due
+        # exits 0 with counts only in the job summary (filled, due but left empty); a database error fails the job
+        run: uv run --no-sync python -m scripts.vn_stock_decision_outcome
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - if: always()
+        uses: ./.github/actions/pipeline-state
+        with:
+          pipeline: vn_stock_decision_outcome
+          job-status: ${{ job.status }}
+          success-message: Filled the decision outcomes that are due
+          failure-message: Pipeline failed, can not fill the decision outcomes
+
   vn_stock_get_history:
     name: vn stock get history
     needs: vn_stock_screen
@@ -237,7 +265,7 @@ jobs:
           failure-message: Pipeline failed, can not get or store the LLM decisions
 
   notification:
-    needs: [start-analyze, install, vn_stock_screen, vn_stock_get_history, vn_stock_analyze, vn_stock_decision_filter, vn_stock_llm_decision]  # each job added to this workflow goes here too
+    needs: [start-analyze, install, vn_stock_screen, vn_stock_decision_outcome, vn_stock_get_history, vn_stock_analyze, vn_stock_decision_filter, vn_stock_llm_decision]  # each job added to this workflow goes here too
     if: always()  # also after a failed or skipped job: it only reads the state files they wrote
     runs-on: ubuntu-latest
     steps:
