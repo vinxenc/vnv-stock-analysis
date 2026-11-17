@@ -1,6 +1,6 @@
 # Phase 2 — Buy / skip decision per symbol (Claude, Jev, TabICL) and a Telegram channel
 
-Status: **in progress** (2026-11-14; first draft 2026-10-28 was a market summary, replaced). Step 1 is done (#28); in step 2 the filter job is done (#29); the LLM pipeline exists as a happy case (2026-11-16: `vn_stock_llm_decision` with the `BaseDecider` and `LLMProvider` interfaces, Claude through OpenRouter, see "Decisions"); the rest of step 2 (`is_latest_session`, the generic decide script) is dropped (user, 2026-11-17), so step 2 is done; step 6 is built (2026-11-17) but not wired into a workflow until its spot-check is done; steps 4, 5 and 7 to 9 are not started. Comes after [phase-1-sql-screens.md](phase-1-sql-screens.md), which has run green on GitHub since 2026-11-11. Work through the checklist below in order: one step = one PR. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** The TabICL step needs the feature panel of [phase-3-logistic-regression-score.md](phase-3-logistic-regression-score.md) step 1.
+Status: **in progress** (2026-11-14; first draft 2026-10-28 was a market summary, replaced). Step 1 is done (#28); in step 2 the filter job is done (#29); the LLM pipeline exists as a happy case (2026-11-16: `vn_stock_llm_decision` with the `BaseDecider` and `LLMProvider` interfaces, Claude through OpenRouter, see "Decisions"); the rest of step 2 (`is_latest_session`, the generic decide script) is dropped (user, 2026-11-17), so step 2 is done; step 6 is built (2026-11-17), its job is wired in step 8; steps 4, 5 and 7 to 9 are not started. Comes after [phase-1-sql-screens.md](phase-1-sql-screens.md), which has run green on GitHub since 2026-11-11. Work through the checklist below in order: one step = one PR. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** The TabICL step needs the feature panel of [phase-3-logistic-regression-score.md](phase-3-logistic-regression-score.md) step 1.
 
 ## Goal
 
@@ -130,8 +130,11 @@ Done. The rest of this step (`is_latest_session`, a generic `scripts/vn_stock_de
 - [x] `scripts/vn_stock_decision_outcome.py` runs it in one transaction. Job summary and log: counts only (filled, due but left empty).
 - [x] Idempotent: rows not due yet, or whose bar is not stored yet, stay null and are picked up by a later run; a row left empty by the rules above stays empty on every run.
 - [x] Tests on the real Postgres fixture: due, not due, exact +3% on several price pairs, a ceiling close (+7%) filled, a 10% gap left empty, a move before `t` ignored, a symbol halted on `t+5` that trades on `t+6`, a missing bar in between, two `model_name`s on one symbol, a second run changes nothing, a re-answered row (outcome reset by the upsert) is filled again.
-- [ ] **Spot-check** that a stored close is the final one (review-debt item 11): the sync starts at 14:45 VN, and a stored bar is never refreshed, so a non-final close would make the outcome wrong for good. Compare 3 closes of a recent sync run's `vn-stock-latest-prices` artifact with the same bars fetched after 15:00.
-- [x] Done when: running it twice gives the same table (`test_a_second_run_changes_nothing`). The job is not wired yet (step 8): wait for the spot-check above, since a filled outcome is never rewritten.
+- [x] **Spot-check** that a stored close is the final one (review-debt item 11): the sync starts at 14:45 VN, and a stored bar is never refreshed, so a non-final close would make the outcome wrong for good. Compare 3 closes of a recent sync run's `vn-stock-latest-prices` artifact with the same bars fetched after 15:00.
+  - Done on 2026-11-17, but it could not test 14:45. The 5 closes of HPG, FPT, VCB, SSI and MWG stored by the 19:22 VN run equal a DNSE fetch at 21:05 VN.
+  - No sync run has ever fetched near 14:45. The scheduled runs start 8 to 10 hours late (22:38 to 00:49 VN since 2026-11-04), and the dispatches run between 19:00 and 21:00 VN. So every stored bar so far was fetched after the close.
+  - The risk is open only for a scheduled run that GitHub starts on time. Accepted by the user (2026-11-17); the cron stays at 14:45 VN.
+- [x] Done when: running it twice gives the same table (`test_a_second_run_changes_nothing`). The job is wired in step 8.
 
 ### 7. Telegram message
 
