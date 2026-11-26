@@ -77,11 +77,16 @@ def _input(raw: scoring.Raw, name: str) -> float | None:
 
 
 def build_panel(
-    engine: Engine, start: dt.date, end: dt.date, is_working_day: Callable[[dt.date], bool], indicators: Indicators
+    engine: Engine,
+    start: dt.date,
+    end: dt.date,
+    is_working_day: Callable[[dt.date], bool],
+    indicators: Indicators,
+    prices: Prices | None = None,
 ) -> list[dict]:
     """One row per (date, symbol) of the universe, for every stored session in [start, end]. A cell is None when it
     cannot be computed; the labels are None until t+5 is stored (and wherever `outcome` leaves them empty)."""
-    prices = load_prices(engine)
+    prices = prices if prices is not None else load_prices(engine)
     dates = {symbol: [row.date for row in rows] for symbol, rows in prices.items()}
     closes = {symbol: {row.date: row.close for row in rows} for symbol, rows in prices.items()}
     sessions = sorted({day for days in dates.values() for day in days})
@@ -134,12 +139,13 @@ def _same(stored: dict, expected: dict) -> bool:
     return True
 
 
-def lookahead_check(engine: Engine, indicators: Indicators) -> tuple[int, list[str]]:
+def lookahead_check(engine: Engine, indicators: Indicators, prices: Prices | None = None) -> tuple[int, list[str]]:
     """Replay every session of `vn_stock_rankings` and compare each stored indicator's `raw` with the replayed one.
-    Returns (sessions compared, mismatches as readable lines). Zero sessions compared proves nothing."""
+    Returns (sessions compared, mismatches as readable lines). Zero sessions compared proves nothing. `prices`: what
+    `load_prices` returned, to read the table once."""
     with Session(engine) as session:
         stored = session.exec(select(Ranking.date, Ranking.symbol, Ranking.indicators).order_by(Ranking.date)).all()
-    prices = load_prices(engine)
+    prices = prices if prices is not None else load_prices(engine)
     dates = {symbol: [row.date for row in rows] for symbol, rows in prices.items()}
     mismatches: list[str] = []
     by_session: dict[dt.date, list[tuple[str, list[dict]]]] = {}

@@ -42,7 +42,8 @@ def main(output_csv: Path = Path("out/features.csv")) -> int:
             {"skip": WARM_UP - 1},
         ).one()
     indicators = TalibIndicators()
-    rows = panel.build_panel(engine, start, end, lambda day: off_reason(day) is None, indicators)
+    prices = panel.load_prices(engine)  # read once, for the panel and the check
+    rows = panel.build_panel(engine, start, end, lambda day: off_reason(day) is None, indicators, prices)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with output_csv.open("w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, COLUMNS)
@@ -73,7 +74,7 @@ def main(output_csv: Path = Path("out/features.csv")) -> int:
         f" sessions with none {sum(n == 0 for n in per_session)}"
     )
 
-    compared, mismatches = panel.lookahead_check(engine, indicators)
+    compared, mismatches = panel.lookahead_check(engine, indicators, prices)
     log.info(f"look-ahead check: {compared} sessions of vn_stock_rankings compared, {len(mismatches)} differences")
     for line in mismatches[:50]:
         log.info("  " + line)
