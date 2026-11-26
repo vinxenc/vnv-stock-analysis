@@ -14,13 +14,14 @@ Possible outcomes, all useful:
 
 ## Decisions (2026-11-14)
 
-- **One pooled model for all symbols**, not one per symbol: about 380 rows per symbol (about 75 independent 5-session periods) for 20–32 coefficients would overfit, the cross-sectional label only exists across symbols, and the per-symbol probabilities would not be comparable. Differences between symbols come in as features (size, volatility, later sector), see step 6.
+- **One pooled model for all symbols**, not one per symbol: about 380 rows per symbol (about 75 independent 5-session periods) for 21–35 coefficients (21 inputs, plus the 14 of step 4) would overfit, the cross-sectional label only exists across symbols, and the per-symbol probabilities would not be comparable. Differences between symbols come in as features (size, volatility, later sector), see step 6.
 - **Train on many sessions pooled, retrain monthly, score daily.** Not trained per day: one session has about 90 rows, and its labels are only known 5 sessions later.
 - Label: 1 when the symbol's 5-session forward return beats the cross-sectional **median** of that session, else 0 (balanced classes, market direction removed). Second label, evaluated the same way: `hit_3pct_5` = `close(t+5) ≥ close(t) × 1.03`, Phase 2's definition of a right buy, so the results here compare with Phase 2's deciders.
 - Models: L2 logistic regression (scikit-learn; statsmodels only to read the coefficients, its p-values are too optimistic here: rows of one session are correlated and the 5-session labels overlap) and LightGBM (`lightgbm`, binary objective). LightGBM is kept small because the signal is weak and the rows are correlated: shallow trees (`num_leaves` 7–15), a large `min_data_in_leaf` (a few hundred), subsampling of rows and columns, and the number of rounds chosen by early stopping on the inner walk-forward.
 - The panel builder lives in `libs/decision/panel.py` (tested, 95% gate), not in `research/`, because Phase 2's TabICL job calls it every day; `research/` only calls it and writes the CSV.
+- **Two populations, every metric on both** (review-debt item 2): the whole universe (about 90 liquid symbols per session) and Phase 2's candidates, the rows of each session with `score >= MIN_SCORE` (`libs/decision/candidates.py`, imported, not copied). Phase 2 decides only the candidates, so only the second set of numbers compares with its deciders and with TabICL's backtest. Models are trained on the whole universe (more rows) and only evaluated on both. Chosen here, change if wrong: a per-session metric of the candidates (rank IC, top minus bottom fifth) skips a session with fewer than 5 candidates, and the report says how many sessions it skipped.
 - Inputs are the indicators' **raw values**, not their points, standardised per session (z-score), missing = 0 after standardising. Binary indicators stay 0/1.
-- Option B for the history: drop #5 (SMA200) and #17 (250-session high), so the panel starts about 70 sessions into the history instead of about 250 (about 380 sessions instead of about 200). #1 and #19 share one raw value (`close_vs_sma20`), so 20 input columns.
+- Option B for the history: drop #5 (SMA200) and #17 (250-session high), so the panel starts about 70 sessions into the history instead of about 250 (about 380 sessions instead of about 200). That leaves 22 indicators; #1 and #19 share one raw value (`close_vs_sma20`), so 21 input columns (the table of step 1).
 
 Open:
 - The name of the optional dependency group for `research/` (none exists in the repo yet; `research` is the obvious one).
@@ -51,19 +52,19 @@ Replays `libs/analysis` on every past session: for session t, only the bars up t
 - [ ] The forward labels use `HORIZON`, `TARGET` and the market calendar of `libs/decision/outcome.py` (Phase 2 step 6: `t+5` is the fifth distinct date after `t` in `vn_stock_prices`), not a definition of their own; a test checks that `hit_3pct_5` equals the stored `hit` of `vn_stock_decisions` on the same rows.
 - [ ] Raw values in the file, no z-score (the same file serves logistic, linear or anything else).
 - [ ] **Look-ahead check:** for every session that has rows in `vn_stock_rankings`, the exported raw values equal the stored ones (`indicators[*].raw`; a gated #22 / #23 stores only `sma50_change`, so skip those). Any difference is a bug to fix before going on.
-- [ ] Sanity: the share of `beat_median = 1` is about 50% every session; row count about 34,000. Record the share of `hit_3pct_5 = 1` (the base rate Phase 2's buys must beat).
+- [ ] Sanity: the share of `beat_median = 1` is about 50% every session; row count about 34,000. Record the share of `hit_3pct_5 = 1` on both populations of "Decisions", over the whole panel: a sanity statistic only. The base rate a result is compared with is computed by the step 2 helper on the same population and the same test months as that result, since the share can drift over time. Record the number of candidates per session too (median, minimum, sessions with none).
 
 Done when the CSV exists, the look-ahead check passes and the README lists the script.
 
 ## Step 2. Baselines (the bar to beat)
 
 - [ ] Walk-forward evaluation helper shared with step 3: monthly folds, expanding training window, **5-session gap** between training and test, metrics on the test months only.
-- [ ] Metrics: AUC; rank IC per session (Spearman of prediction vs `fwd_return_5`) with its t-stat computed on **non-overlapping sessions** (every 5th session, averaged over the 5 offsets; the overlapping t-stat inflated TiRex-2's result, see the foundation-model plan); top-fifth minus bottom-fifth return; hit rate.
+- [ ] Metrics: AUC; rank IC per session (Spearman of prediction vs `fwd_return_5`) with its t-stat computed on **non-overlapping sessions** (every 5th session, averaged over the 5 offsets; the overlapping t-stat inflated TiRex-2's result, see the foundation-model plan); top-fifth minus bottom-fifth return; hit rate, next to the base rate of the same rows (the share of `hit_3pct_5 = 1` or `beat_median = 1` on the test months). The helper reports each metric twice, on the whole universe and on the candidates (`score >= MIN_SCORE`, see "Decisions"), from the same predictions; steps 3 and 4 and Phase 2's TabICL backtest use the same helper, so their numbers come in both forms too.
 - [ ] Baseline 1: the current `score`.
 - [ ] Baseline 2: equal-weight mean of the standardised inputs (no learning).
 - [ ] Write the numbers into this file ("Results").
 
-## Step 3. Logistic regression and LightGBM, 20 inputs
+## Step 3. Logistic regression and LightGBM, 21 inputs
 
 Both models on the same folds, both labels (`beat_median` first, `hit_3pct_5` second).
 
@@ -87,7 +88,7 @@ Only stationary, comparable-across-symbols features; never raw prices or raw vol
 - [ ] `max_return_20` (lottery effect), `drawdown_60`
 - [ ] `volume_change_1`
 - [ ] Skip days whose one-day change is beyond ±7% (ex-rights on adjusted prices) when counting limit days.
-- [ ] Rerun step 3 (both models) with 20 + these inputs. Choose which new inputs to keep **inside each training window** (its inner walk-forward), never from the test months: the outer test months then score the whole procedure (selection included) once, and their numbers stay an honest estimate.
+- [ ] Rerun step 3 (both models) with 21 + these inputs. Choose which new inputs to keep **inside each training window** (its inner walk-forward), never from the test months: the outer test months then score the whole procedure (selection included) once, and their numbers stay an honest estimate.
 
 ## Step 5. Use the result (only after a "go")
 
