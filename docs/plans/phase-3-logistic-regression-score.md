@@ -22,20 +22,19 @@ Possible outcomes, all useful:
 - **Two populations, every metric on both** (review-debt item 2): the whole universe (about 90 liquid symbols per session) and Phase 2's candidates, the rows of each session with `score >= MIN_SCORE` (`libs/decision/candidates.py`, imported, not copied). Phase 2 decides only the candidates, so only the second set of numbers compares with its deciders and with TabICL's backtest. Models are trained on the whole universe (more rows) and only evaluated on both. Chosen here, change if wrong: a per-session metric of the candidates (rank IC, top minus bottom fifth) skips a session with fewer than 5 candidates, and the report says how many sessions it skipped.
 - Inputs are the indicators' **raw values**, not their points, standardised per session (z-score), missing = 0 after standardising. Binary indicators stay 0/1.
 - Option B for the history: drop #5 (SMA200) and #17 (250-session high), so the panel starts about 70 sessions into the history instead of about 250 (about 380 sessions instead of about 200). That leaves 22 indicators; #1 and #19 share one raw value (`close_vs_sma20`), so 21 input columns (the table of step 1).
-
-Open:
-- The name of the optional dependency group for `research/` (none exists in the repo yet; `research` is the obvious one).
+- **Dependencies** (review-debt item 10): the research libraries go in a dependency group `research`, installed only on the user's machine (`uv sync --group research`); no CI or pipeline job installs it, so `setup-env` needs no change for it. `libs/decision/panel.py` sits under the 95% gate, and CI's test job installs only `dev`, so it uses the main dependencies only (numpy, ta-lib, sqlmodel; no pandas): it returns plain rows, and pandas, scikit-learn, statsmodels and lightgbm are imported only in `research/`, which is outside the coverage gate (`--cov=libs --cov=scripts`) and never imported by `tests/`. The audit covers the group anyway (step 0).
 
 ## Step 0. Setup
 
 - [ ] `uv add --group research pandas scikit-learn statsmodels lightgbm` (not in the main dependencies: CI and the pipeline never install it).
+- [ ] CI's audit (`.github/workflows/ci.yml`, job `audit`) exports `--no-dev` only, so it would never see this group: change its `uv export` to `--all-groups`, so every group is audited, `research` now and `tabicl` (Phase 2 step 5) later, with no change per group (`dev` is audited too, which costs nothing).
 - [ ] Local Postgres per `CLAUDE.md`, `alembic upgrade head` (the price table is `vn_stock_prices` since migration `0007`).
 
 ## Step 1. Feature panel (`libs/decision/panel.py`, `research/export_features.py` → `out/features.csv`)
 
-Replays `libs/analysis` on every past session: for session t, only the bars up to t of each symbol (`scoring.raw_values(candles, engine)`, as `libs/analysis/report.py` calls it).
+Replays `libs/analysis` on every past session: for session t, the same window the live run reads, the last `SESSIONS` (260) bars of each symbol up to t, never all bars up to t (`scoring.raw_values(candles, engine)`, as `libs/analysis/report.py` calls it). RSI and PPO are recursive (Wilder's smoothing, EMAs), so their value depends on where the window starts: a longer window would give slightly different inputs from the ones the live run scored and stored (review-debt item 14). `SESSIONS` moves from `scripts/vn_stock_get_history.py` into `libs/` so the script and `panel.py` import one constant.
 
-- [ ] `libs/decision/panel.py`: `build_panel(engine, start, end)` → rows as below; unit-tested on hand-made bars (no look-ahead, labels empty when t+5 is not there yet). `research/export_features.py` calls it and writes the CSV.
+- [ ] `libs/decision/panel.py`: `build_panel(engine, start, end)` → rows as below; unit-tested on hand-made bars (no look-ahead, labels empty when t+5 is not there yet, at most `SESSIONS` bars per replay). Main dependencies only (see "Decisions"). `research/export_features.py` calls it and writes the CSV.
 
 - [ ] Universe per session = the screen's rule (20-session average `close × volume` ≥ 20 billion VND, a bar on t).
 - [ ] One row per (`date`, `symbol`). Columns:
@@ -51,7 +50,11 @@ Replays `libs/analysis` on every past session: for session t, only the bars up t
 - [ ] Empty cell = cannot be computed. Labels empty for the last 5 sessions (not used for training).
 - [ ] The forward labels use `HORIZON`, `TARGET` and the market calendar of `libs/decision/outcome.py` (Phase 2 step 6: `t+5` is the fifth distinct date after `t` in `vn_stock_prices`), not a definition of their own; a test checks that `hit_3pct_5` equals the stored `hit` of `vn_stock_decisions` on the same rows.
 - [ ] Raw values in the file, no z-score (the same file serves logistic, linear or anything else).
-- [ ] **Look-ahead check:** for every session that has rows in `vn_stock_rankings`, the exported raw values equal the stored ones (`indicators[*].raw`; a gated #22 / #23 stores only `sma50_change`, so skip those). Any difference is a bug to fix before going on.
+- [ ] **Look-ahead check:** for every session that has rows in `vn_stock_rankings`, the replayed raw values equal the stored ones (`indicators[*].raw`; a gated #22 / #23 stores only `sma50_change`, so skip those), within a tolerance (`math.isclose`, `rel_tol=1e-6`, `abs_tol=1e-9`: the windows are the same, so only float noise is allowed). Any difference beyond it is a bug, or a stored bar that changed after the live run (say which), to fix or explain before going on. It covers only the sessions stored since 2026-11-11, not the whole panel. Indicator 12 is stored in two forms, told apart by the `up_day` key of its `raw` (#33):
+  - Rows without `up_day` (stored before 2026-11-16) hold the gated value in `volume_vs_average`: 0 on a session that was not an up day. That is the `strength` of the `Detection` that `up_day_volume_ratio` still returns, so compare the strength.
+  - Rows with `up_day` hold the real ratio in `volume_vs_average`: compare the ratio, and `up_day` too.
+
+  So the check runs on the features' own output (the `Detection`), not on the CSV, whose `volume_vs_average` is always the real ratio.
 - [ ] Sanity: the share of `beat_median = 1` is about 50% every session; row count about 34,000. Record the share of `hit_3pct_5 = 1` on both populations of "Decisions", over the whole panel: a sanity statistic only. The base rate a result is compared with is computed by the step 2 helper on the same population and the same test months as that result, since the share can drift over time. Record the number of candidates per session too (median, minimum, sessions with none).
 
 Done when the CSV exists, the look-ahead check passes and the README lists the script.
@@ -98,7 +101,7 @@ Pick one:
   - [ ] The trained model stored in a new table `vn_stock_<thing>` (naming rule in `CLAUDE.md`), one row per training run with its training window and test metrics; Alembic migration. Logistic: coefficients and standardisation parameters. LightGBM: the booster as text (`model_to_string`) and its calibration map.
   - [ ] Monthly retrain: a job of `VN Stock Analysis` that runs on the first session of the month (or when no coefficients exist), not a new workflow; reads `vn_stock_prices`, needs `DATABASE_URL`; ends with `pipeline-state`, added to `notification`'s `needs`.
   - [ ] Daily: `vn_stock_analyze` multiplies today's raw values by the latest coefficients (logistic), or, for LightGBM, loads the stored booster text, predicts on today's raw values and applies the stored calibration map; the probability is stored next to the score in `vn_stock_rankings` and shown in the job summary.
-  - [ ] scikit-learn only where needed (the daily logistic part is a dot product and needs none; LightGBM needs `lightgbm` in the job that scores, in its own dependency group).
+  - [ ] scikit-learn only where needed (the daily logistic part is a dot product and needs none; LightGBM needs `lightgbm` in the job that scores, in its own dependency group, installed through `setup-env`'s `groups` input of Phase 2 step 5).
   - [ ] Tests with the 95% gate; README updated.
 - [ ] **(c) A `tabular` model in Phase 2** (a new `model_name`, no migration), only if the `hit_3pct_5` model passed its own go / no-go: that model's probability of `hit_3pct_5` above a threshold = buy, stored in `vn_stock_decisions` next to Claude, Jev and TabICL and scored the same way.
 - [ ] Forward check: the first 3 months of live probabilities are evaluated with the same metrics before anyone relies on them.
