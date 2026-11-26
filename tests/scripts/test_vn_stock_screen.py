@@ -9,12 +9,13 @@ import pytest
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from libs.constants import NO_DATA, NOT_DUE
+from libs.constants import MIN_TURNOVER, NO_DATA, NOT_DUE
+from libs.constants import TURNOVER_SESSIONS as SESSIONS
 from libs.db.models import Price, ScreenHistory
 from scripts import vn_stock_daily_price_store as price_store
 from scripts import vn_stock_screen
 from scripts.vn_stock_latest_price_retrieval import read_symbols
-from scripts.vn_stock_screen import MIN_TURNOVER, SESSION_FILE, SESSIONS, main, next_session, screen
+from scripts.vn_stock_screen import SESSION_FILE, main, next_session, screen
 
 TODAY = dt.date(2026, 10, 23)  # a fixed day in the past, so main()'s default (the real today) never equals it
 

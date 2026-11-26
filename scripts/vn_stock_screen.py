@@ -23,26 +23,24 @@ from pathlib import Path
 from sqlalchemy import Engine, case, func
 from sqlmodel import Session, select
 
-from libs.constants import MIN_COVERAGE, NO_DATA, NOT_DUE, VN_TZ
+from libs.constants import MIN_COVERAGE, MIN_TURNOVER, NO_DATA, NOT_DUE, TURNOVER_SESSIONS, VN_TZ
 from libs.db import connect
 from libs.db.models import Price, ScreenHistory
 from libs.logger import Logger, LogxideLogger
 from scripts.vn_holiday import next_session
 
-MIN_TURNOVER = 20_000_000  # thousand VND (prices are in thousand VND) = 20 billion VND per session
 SESSION_FILE = "screen_session.txt"  # the ISO date screened, next to the shortlist
-SESSIONS = 20  # rows, not calendar days (holidays); a symbol with fewer rows is averaged over the rows it has
 logger = LogxideLogger("vn_stock_screen")
 
 
 def screen(engine: Engine, today: dt.date, log: Logger = logger) -> list[str]:
-    """Symbols that traded on `today` and whose average `close × volume` over their last SESSIONS rows up to it is >=
-    MIN_TURNOVER. `today` is the session screened, which may be before the real today (see the module docstring).
+    """Symbols that traded on `today` and whose average `close × volume` over their last TURNOVER_SESSIONS rows up to it
+    is >= MIN_TURNOVER. `today` is the session screened, which may be before the real today (see the module docstring).
 
     Sorted. A symbol with no row today, or a halted one (volume 0 today), is dropped whatever its average. A halted
-    earlier day counts as 0 turnover. A symbol with fewer than SESSIONS rows is averaged over the rows it has.
-    ponytail: until `vn_stock_prices` is backfilled a new listing can pass on a single big day; require SESSIONS rows
-    then.
+    earlier day counts as 0 turnover. A symbol with fewer than TURNOVER_SESSIONS rows is averaged over the rows it has.
+    ponytail: until `vn_stock_prices` is backfilled a new listing can pass on a single big day; require
+    TURNOVER_SESSIONS rows then.
     """
     recent = (
         select(
@@ -84,7 +82,7 @@ def screen(engine: Engine, today: dt.date, log: Logger = logger) -> list[str]:
                 )
         rows = session.exec(
             select(recent.c.symbol, func.avg(recent.c.turnover))
-            .where(recent.c.rank <= SESSIONS)
+            .where(recent.c.rank <= TURNOVER_SESSIONS)
             .group_by(recent.c.symbol)
             .having(func.max(case((recent.c.date == today, recent.c.turnover), else_=0)) > 0)  # traded today
         ).all()

@@ -1,11 +1,12 @@
-"""Read the last SESSIONS sessions of every shortlisted symbol from `vn_stock_prices`, one JSON file per symbol.
+"""Read the last HISTORY_SESSIONS sessions of every shortlisted symbol from `vn_stock_prices`, one JSON file per symbol.
 
 Usage: DATABASE_URL=... uv run python -m scripts.vn_stock_get_history [symbols_csv] [output_dir]
 Default: out/liquid_symbols.csv (see vn_stock_screen) -> out/vn_stock_history/<SYMBOL>.json
 Each file is a JSON array of `Price` rows in ascending date order (the analysis reads them as time series), ending on
 the session in `screen_session.txt` next to the shortlist (the one the screen did; later bars, if any, are left out). A
-symbol with fewer than SESSIONS rows is logged, never fatal: the analysis decides what to skip. A symbol with no row
-gets no file. This job only reads the database. The output directory is emptied first, so it never holds an older run.
+symbol with fewer than HISTORY_SESSIONS rows is logged, never fatal: the analysis decides what to skip. A symbol with
+no row gets no file. This job only reads the database. The output directory is emptied first, so it never holds an
+older run.
 Exit 0 = at least one file written, 4 = no row found for any symbol (nothing written), anything else = crash.
 """
 
@@ -18,21 +19,20 @@ from pathlib import Path
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from libs.constants import NO_DATA
+from libs.constants import HISTORY_SESSIONS, NO_DATA
 from libs.db import connect
 from libs.db.models import Price
 from libs.logger import Logger, LogxideLogger
 from scripts.vn_stock_latest_price_retrieval import read_symbols
 from scripts.vn_stock_screen import SESSION_FILE
 
-SESSIONS = 260  # rows, not calendar days (holidays); the longest lookback of the scoring table is 250 (#17) + a buffer
 logger = LogxideLogger("vn_stock_get_history")
 
 
 def get_history(session: Session, symbol: str, until: dt.date) -> list[Price]:
-    """The last SESSIONS rows of `symbol` up to `until`, in ascending date order."""
+    """The last HISTORY_SESSIONS rows of `symbol` up to `until`, in ascending date order."""
     query = select(Price).where(Price.symbol == symbol, Price.date <= until)
-    return list(reversed(session.exec(query.order_by(Price.date.desc()).limit(SESSIONS)).all()))
+    return list(reversed(session.exec(query.order_by(Price.date.desc()).limit(HISTORY_SESSIONS)).all()))
 
 
 def main(
@@ -48,7 +48,7 @@ def main(
     with Session(engine or connect()) as session:  # one connection for the whole job (NullPool: one per checkout)
         for symbol in symbols:
             rows = get_history(session, symbol, until)
-            if len(rows) < SESSIONS:
+            if len(rows) < HISTORY_SESSIONS:
                 short.append(f"{symbol}={len(rows)}")
             if rows:
                 output_dir.mkdir(parents=True, exist_ok=True)
@@ -58,7 +58,7 @@ def main(
                 written += 1
     log.info("wrote the history of %d of %d symbols to %s", written, len(symbols), output_dir)
     if short:
-        log.warning("fewer than %d rows: %s", SESSIONS, ", ".join(short))
+        log.warning("fewer than %d rows: %s", HISTORY_SESSIONS, ", ".join(short))
     if not written:
         log.error("no row found for the %s symbols, nothing written", symbols_csv)
         return NO_DATA

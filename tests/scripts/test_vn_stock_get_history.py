@@ -9,9 +9,10 @@ from unittest.mock import MagicMock
 from sqlalchemy import Engine
 from sqlmodel import Session
 
+from libs.constants import HISTORY_SESSIONS as SESSIONS
 from libs.constants import NO_DATA
 from libs.db.models import Price
-from scripts.vn_stock_get_history import SESSIONS, get_history, main
+from scripts.vn_stock_get_history import get_history, main
 from scripts.vn_stock_screen import SESSION_FILE
 
 END = dt.date(2026, 10, 23)

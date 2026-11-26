@@ -1,6 +1,6 @@
 # Phase 3 — Logistic regression and LightGBM on the screening indicators
 
-Status: **draft, not started** (2026-11-14; LightGBM added the same day). Research first (`research/`), pipeline only if it wins. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** Related: [phase-1-sql-screens.md](phase-1-sql-screens.md) ("Scoring design", whose weights and thresholds are placeholders), [phase-4-foundation-model-forecasts.md](phase-4-foundation-model-forecasts.md) (why the zero-shot forecasters were set aside), [phase-5-rd-agent.md](phase-5-rd-agent.md).
+Status: **in progress** (2026-11-14; LightGBM added the same day). Step 0 is done and step 1 is built (2026-11-26); its look-ahead check still has to run against the production database, the only one with stored rankings. Research first (`research/`), pipeline only if it wins. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** Related: [phase-1-sql-screens.md](phase-1-sql-screens.md) ("Scoring design", whose weights and thresholds are placeholders), [phase-4-foundation-model-forecasts.md](phase-4-foundation-model-forecasts.md) (why the zero-shot forecasters were set aside), [phase-5-rd-agent.md](phase-5-rd-agent.md).
 
 ## Goal
 
@@ -26,18 +26,18 @@ Possible outcomes, all useful:
 
 ## Step 0. Setup
 
-- [ ] `uv add --group research pandas scikit-learn statsmodels lightgbm` (not in the main dependencies: CI and the pipeline never install it).
-- [ ] CI's audit (`.github/workflows/ci.yml`, job `audit`) exports `--no-dev` only, so it would never see this group: change its `uv export` to `--all-groups`, so every group is audited, `research` now and `tabicl` (Phase 2 step 5) later, with no change per group (`dev` is audited too, which costs nothing).
-- [ ] Local Postgres per `CLAUDE.md`, `alembic upgrade head` (the price table is `vn_stock_prices` since migration `0007`).
+- [x] `uv add --group research pandas scikit-learn statsmodels lightgbm` (not in the main dependencies: CI and the pipeline never install it).
+- [x] CI's audit (`.github/workflows/ci.yml`, job `audit`) exports `--no-dev` only, so it would never see this group: change its `uv export` to `--all-groups`, so every group is audited, `research` now and `tabicl` (Phase 2 step 5) later, with no change per group (`dev` is audited too, which costs nothing).
+- [x] Local Postgres per `CLAUDE.md`, `alembic upgrade head` (the price table is `vn_stock_prices` since migration `0007`).
 
 ## Step 1. Feature panel (`libs/decision/panel.py`, `research/export_features.py` → `out/features.csv`)
 
 Replays `libs/analysis` on every past session: for session t, the same window the live run reads, the last `SESSIONS` (260) bars of each symbol up to t, never all bars up to t (`scoring.raw_values(candles, engine)`, as `libs/analysis/report.py` calls it). RSI and PPO are recursive (Wilder's smoothing, EMAs), so their value depends on where the window starts: a longer window would give slightly different inputs from the ones the live run scored and stored (review-debt item 14). `SESSIONS` moves from `scripts/vn_stock_get_history.py` into `libs/` so the script and `panel.py` import one constant.
 
-- [ ] `libs/decision/panel.py`: `build_panel(engine, start, end)` → rows as below; unit-tested on hand-made bars (no look-ahead, labels empty when t+5 is not there yet, at most `SESSIONS` bars per replay). Main dependencies only (see "Decisions"). `research/export_features.py` calls it and writes the CSV.
+- [x] `libs/decision/panel.py`: `build_panel(engine, start, end, is_working_day, indicators)` → rows as below (the calendar is passed in, as `fill_outcomes` takes it, since `libs/` never imports `scripts/`); unit-tested on hand-made bars (no look-ahead, labels empty when t+5 is not there yet, at most `SESSIONS` bars per replay). Main dependencies only (see "Decisions"). `research/export_features.py` calls it and writes the CSV.
 
-- [ ] Universe per session = the screen's rule (20-session average `close × volume` ≥ 20 billion VND, a bar on t).
-- [ ] One row per (`date`, `symbol`). Columns:
+- [x] Universe per session = the screen's rule (20-session average `close × volume` ≥ 20 billion VND, a bar on t).
+- [x] One row per (`date`, `symbol`). Columns:
 
   | Group | Columns |
   |---|---|
@@ -46,18 +46,24 @@ Replays `libs/analysis` on every past session: for session t, the same window th
   | baseline | `score` (the 0–100 score of that session) |
   | labels (future, never an input) | `fwd_return_5`, `excess_return_5` (minus the session median), `beat_median` (0/1), `hit_3pct_5` (0/1, `fwd_return_5 ≥ 0.03`) |
 
-- [ ] #22 and #23 carry their raw strength even when the uptrend gate blocks their points, so the model can learn whether the gate matters.
-- [ ] Empty cell = cannot be computed. Labels empty for the last 5 sessions (not used for training).
-- [ ] The forward labels use `HORIZON`, `TARGET` and the market calendar of `libs/decision/outcome.py` (Phase 2 step 6: `t+5` is the fifth distinct date after `t` in `vn_stock_prices`), not a definition of their own; a test checks that `hit_3pct_5` equals the stored `hit` of `vn_stock_decisions` on the same rows.
-- [ ] Raw values in the file, no z-score (the same file serves logistic, linear or anything else).
+- [x] #22 and #23 carry their raw strength even when the uptrend gate blocks their points, so the model can learn whether the gate matters.
+- [x] Empty cell = cannot be computed. Labels empty for the last 5 sessions (not used for training).
+- [x] The forward labels use `HORIZON`, `TARGET` and the market calendar of `libs/decision/outcome.py` (Phase 2 step 6: `t+5` is the fifth distinct date after `t` in `vn_stock_prices`), not a definition of their own; a test checks that `hit_3pct_5` equals the stored `hit` of `vn_stock_decisions` on the same rows. Built as a Python function `outcome` next to the SQL `_FILL` in `outcome.py` (the SQL's per-row subqueries do not scale to the panel's rows); `test_panel.py` runs both on every rule of `_FILL` (the five exact +3% pairs, a ceiling close, a 10% gap, a missing bar, a halt on t+5, t+5 not stored, a session missed for every symbol, a holiday).
+- [x] Raw values in the file, no z-score (the same file serves logistic, linear or anything else).
 - [ ] **Look-ahead check:** for every session that has rows in `vn_stock_rankings`, the replayed raw values equal the stored ones (`indicators[*].raw`; a gated #22 / #23 stores only `sma50_change`, so skip those), within a tolerance (`math.isclose`, `rel_tol=1e-6`, `abs_tol=1e-9`: the windows are the same, so only float noise is allowed). Any difference beyond it is a bug, or a stored bar that changed after the live run (say which), to fix or explain before going on. It covers only the sessions stored since 2026-11-11, not the whole panel. Indicator 12 is stored in two forms, told apart by the `up_day` key of its `raw` (#33):
   - Rows without `up_day` (stored before 2026-11-16) hold the gated value in `volume_vs_average`: 0 on a session that was not an up day. That is the `strength` of the `Detection` that `up_day_volume_ratio` still returns, so compare the strength.
   - Rows with `up_day` hold the real ratio in `volume_vs_average`: compare the ratio, and `up_day` too.
 
   So the check runs on the features' own output (the `Detection`), not on the CSV, whose `volume_vs_average` is always the real ratio.
-- [ ] Sanity: the share of `beat_median = 1` is about 50% every session; row count about 34,000. Record the share of `hit_3pct_5 = 1` on both populations of "Decisions", over the whole panel: a sanity statistic only. The base rate a result is compared with is computed by the step 2 helper on the same population and the same test months as that result, since the share can drift over time. Record the number of candidates per session too (median, minimum, sessions with none).
 
-Done when the CSV exists, the look-ahead check passes and the README lists the script.
+  Built (`lookahead_check` in `panel.py`, run by `research/export_features.py`, tested on stored rankings made by the live path); it compares every key of the stored `raw`, `percentile` included, so it also checks that the replayed universe is the live one. **Not run yet:** the local database has no ranking (and prices only up to 2026-11-09), so it compared 0 sessions, which proves nothing. To run by the user against production (it only reads): `DATABASE_URL=<production> uv run python -m research.export_features`, exit 0 only when at least one session was compared and nothing differs.
+- [x] Sanity: the share of `beat_median = 1` is about 50% every session; row count about 34,000. Record the share of `hit_3pct_5 = 1` on both populations of "Decisions", over the whole panel: a sanity statistic only. The base rate a result is compared with is computed by the step 2 helper on the same population and the same test months as that result, since the share can drift over time. Record the number of candidates per session too (median, minimum, sessions with none).
+
+Chosen while building it (2026-11-26, change if wrong):
+- #12's `up_day` is not a column: the CSV keeps 21 inputs (review-debt item 12), so the model sees the real volume ratio without the up-day gate the score applies. Adding `up_day` would make 22.
+- `score` lacks #5 and #17 until a symbol has 200 and 250 rows, so early in the panel it is out of at most 92 points and the `score >= 40` population is a little harder to reach there than live. The step 2 helper compares a result with the base rate of the same months, so this only shifts the candidates over time.
+
+Done when the CSV exists, the look-ahead check passes and the README lists the script. The CSV and the README are done; the check waits for the production run above.
 
 ## Step 2. Baselines (the bar to beat)
 
@@ -114,4 +120,6 @@ Pick one:
 
 ## Results
 
-(Empty. Fill in per phase: date, sessions, rows, metrics, coefficients.)
+Fill in per phase: date, sessions, rows, metrics, coefficients.
+
+**Step 1, local database (2026-11-26)**, prices from 2025-01-02 to 2026-11-09 (406 symbols): 41,439 rows over 390 sessions (2025-04-17 to 2026-11-09), about 106 symbols per session, more than the about 34,000 rows expected. `beat_median = 1` share per session: 0.458 to 0.500 (below 0.5 when ties or an odd count leave the median row at 0). `hit_3pct_5 = 1` share: 0.242 of 40,962 labelled rows on the whole universe, 0.260 of 13,289 on the candidates (`score >= 40`). Candidates per session: median 28, minimum 6, no session without one. About 50 s on a laptop. To be rerun on production with the look-ahead check.
