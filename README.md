@@ -35,11 +35,11 @@ The endpoints are undocumented and may change or block without notice.
 
 ## Develop locally
 
-Needs [uv](https://docs.astral.sh/uv/) and [lefthook](https://lefthook.dev/) (`brew install uv lefthook`). `.python-version` pins Python 3.12, the version CI and the pipelines run, so `uv sync` builds the same environment everywhere.
+Needs [uv](https://docs.astral.sh/uv/) (`brew install uv`). [lefthook](https://lefthook.dev/) is a dev dependency (PyPI `lefthook`), so `uv sync` installs it, and `lefthook.yml` makes the hook call `uv run lefthook`: no global install. `.python-version` pins Python 3.12, the version CI and the pipelines run, so `uv sync` builds the same environment everywhere.
 
 ```bash
 uv sync                  # create .venv and install deps (incl. dev tools)
-lefthook install         # one-time: enable the pre-commit hook
+uv run lefthook install  # one-time: enable the pre-commit hook
 ```
 
 ### Database and migrations
@@ -70,7 +70,7 @@ In production the `CD` workflow (`cd.yml`) applies the migrations on every push 
 | `uv run pytest -m live --no-cov` | Live smoke tests against the real endpoints. Not run by default. |
 | `uv run ruff check libs scripts tests` | Lint. Add `--fix` to auto-fix. |
 | `uv run ruff format libs scripts tests` | Format. The pre-commit hook does this for the staged files; CI does not check formatting. |
-| `lefthook run pre-commit` | Run the pre-commit checks by hand. |
+| `uv run lefthook run pre-commit` | Run the pre-commit checks by hand. |
 | `uv run python -m scripts.vn_stock_daily_price_store [input_json]` | Upsert `out/vn_stock_latest_prices.json` into the database named by `$DATABASE_URL`. |
 | `uv run python -m scripts.vn_stock_screen [output_csv]` | Write the liquid symbols (20-session average turnover) to `out/liquid_symbols.csv` (needs `$DATABASE_URL`). |
 | `uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]` | Fetch the latest price of all symbols (default `data/hose_symbols.csv`, takes about 20 min) and write `out/vn_stock_latest_prices.json`. |
