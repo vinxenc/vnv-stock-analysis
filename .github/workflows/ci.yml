@@ -84,7 +84,7 @@ jobs:
       - uses: ./.github/actions/setup-env
         with:
           dev: true
-      - name: Export locked runtime dependencies
-        run: uv export --locked --no-dev --no-emit-project --no-hashes --quiet -o requirements-audit.txt
+      - name: Export every locked dependency group
+        run: uv export --locked --all-groups --no-emit-project --no-hashes --quiet -o requirements-audit.txt
       - name: pip-audit
         run: uv run pip-audit -r requirements-audit.txt --no-deps --disable-pip
