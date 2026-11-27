@@ -113,9 +113,9 @@ def test_a_symbol_listed_later_has_no_bar_for_the_early_years(symbols_csv: Path,
 
 
 def test_one_failing_year_takes_the_whole_history_from_the_next_source(symbols_csv: Path, engine: Engine) -> None:
-    dnse, vps = FakeSource("DNSE", fails=2020), FakeSource("VPS")
-    assert run(symbols_csv, engine, dnse, vps, calendar=FakeCalendar("FPT")) == 0
-    assert {row[3] for row in stored(engine)} == {"VPS"} and len(vps.calls) == 3
+    dnse, vndirect = FakeSource("DNSE", fails=2020), FakeSource("VNDirect")
+    assert run(symbols_csv, engine, dnse, vndirect, calendar=FakeCalendar("FPT")) == 0
+    assert {row[3] for row in stored(engine)} == {"VNDirect"} and len(vndirect.calls) == 3
     assert len(dnse.calls) == 3  # 2019, then 2020 twice (one retry)
 
 
@@ -125,7 +125,7 @@ def test_a_symbol_no_source_can_fetch_crashes_and_stores_nothing(symbols_csv: Pa
             symbols_csv,
             engine,
             FakeSource("DNSE", fails=2019),
-            FakeSource("VPS", listed=2030),
+            FakeSource("VNDirect", listed=2030),
             calendar=FakeCalendar("FPT"),
         )
     assert stored(engine) == []

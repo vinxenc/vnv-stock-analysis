@@ -7,7 +7,7 @@ today). It asks VNDirect (2 retries) which symbols of `data/hose_symbols.csv` ha
 dividend, bonus shares, a rights issue) on a working day from the first session to today: a day after the last session
 counts too, because the sources adjust the history from midnight on its eve, so the bars the retrieval fetches already
 carry it. It fetches each one's daily bars from START (2019-01-01) to the last session, one request per year (DNSE,
-else VPS for every year, 1 retry each, `delay` seconds between requests), and in one transaction per symbol upserts
+else VNDirect for every year, 1 retry each, `delay` seconds between requests), and in one transaction per symbol upserts
 them and deletes its stored rows the source no longer has between the first and last bar of each year it returned (a
 row stored from another source, or a bar the source drops as invalid, would keep its raw price). The stored history of
 those symbols is then the source's own.
@@ -31,14 +31,16 @@ from libs.constants import VN_TZ
 from libs.db import connect
 from libs.db.models import Price
 from libs.logger import Logger, LogxideLogger
-from libs.prices import DNSE, VPS, PriceNotFoundError, PriceSource, VNDirect
+from libs.prices import DNSE, PriceNotFoundError, PriceSource, VNDirect
 from scripts.vn_holiday import working_days
 from scripts.vn_stock_daily_price_store import upsert
 from scripts.vn_stock_latest_price_retrieval import read_symbols
 from scripts.vn_stock_price_sync_session import from_env
 
 START = dt.date(2019, 1, 1)
-SOURCES = (DNSE(), VPS())
+# Not VPS: its bars before mid-2021 ignore the older corporate actions (HPG 2019-01-02: 9.92, DNSE 7.30, VNDirect
+# 7.293; checked 2026-11-27, FPT and HPG differ by over 2% up to 2021-05-31). DNSE and VNDirect agree within 2%.
+SOURCES = (DNSE(), VNDirect())
 CALENDAR = VNDirect()
 logger = LogxideLogger("vn_stock_dividend_history")
 
