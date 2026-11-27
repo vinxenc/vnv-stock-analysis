@@ -107,7 +107,7 @@ def adjustments(engine: Engine) -> list[tuple]:
     with Session(engine) as session:
         return [
             (a.symbol, str(a.through), round(a.factor, 4), a.source, a.bars)
-            for a in session.exec(select(PriceAdjustment))
+            for a in session.exec(select(PriceAdjustment).order_by(PriceAdjustment.id))
         ]
 
 
@@ -162,6 +162,16 @@ def test_bars_that_moved_otherwise_are_left_alone(tmp_path: Path, engine: Engine
     assert adjustments(engine) == []
     assert [price.close for price in stored(engine)] == [34.6, 34.6, 34.6, 30.0]
     assert any("not adjusted: MSH" in line for line in log.lines)
+
+
+def test_an_unexplained_move_keeps_the_stored_newest_bar(tmp_path: Path, engine: Engine) -> None:
+    """If DNSE re-quotes the latest bar adjusted without the older ones, the raw bar must not be overwritten."""
+    for day in DAYS[:3]:
+        main(write_json(tmp_path / f"{day}.json", ohlc("VPX", day, 21.15)), engine)
+    window = [ohlc("VPX", day, 21.15, factor=0.69) for day in DAYS[:3]]
+    window[1]["volume"] = 7  # not one adjustment: the warning path
+    assert main(write_json(tmp_path / "w.json", *window), engine, FakeLog()) == 0
+    assert [price.close for price in stored(engine)] == [21.15, 21.15, 21.15]
 
 
 def test_too_many_adjustments_store_nothing(tmp_path: Path, engine: Engine) -> None:

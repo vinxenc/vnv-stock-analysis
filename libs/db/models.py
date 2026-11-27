@@ -105,8 +105,9 @@ class PriceAdjustment(SQLModel, table=True):
     __tablename__ = "vn_stock_price_adjustments"
     __table_args__ = (CheckConstraint("factor > 0", name="ck_vn_stock_price_adjustments_factor"),)
 
-    symbol: str = Field(primary_key=True)
-    through: dt.date = Field(primary_key=True)  # the last date adjusted; the ex-date is a later session
+    id: int | None = Field(default=None, primary_key=True)  # two rows may share symbol and `through`
+    symbol: str
+    through: dt.date  # the last date adjusted; the ex-date is a later session
     factor: float
     source: str  # whose bars showed the adjustment
     bars: int  # bars changed

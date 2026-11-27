@@ -5,7 +5,9 @@ is adjusted in place, as of the newest fetch, like the source's own history). On
 last date it adjusted (`through`; the ex-date is a later session, often the next one), the factor every price up to
 that date was multiplied by, the source whose bars showed it, how many bars changed and when. Dividing a bar by the
 product of the factors of the rows whose `through` is on or after its date gives the price as first stored.
-`factor` is guarded by a CHECK (> 0), not by the code alone.
+`factor` is guarded by a CHECK (> 0), not by the code alone. The key is a plain `id`: two adjustments can share a
+symbol and `through` (a halted symbol, a factor the source corrects a day later), and a duplicate must never fail the
+whole store.
 
 Revision ID: 0010
 Revises: 0009
@@ -26,13 +28,14 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.create_table(
         "vn_stock_price_adjustments",
+        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("symbol", sa.String(), nullable=False),
         sa.Column("through", sa.Date(), nullable=False),
         sa.Column("factor", sa.Float(), nullable=False),
         sa.Column("source", sa.String(), nullable=False),
         sa.Column("bars", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint("symbol", "through"),
+        sa.PrimaryKeyConstraint("id"),
         sa.CheckConstraint("factor > 0", name="ck_vn_stock_price_adjustments_factor"),
     )
 

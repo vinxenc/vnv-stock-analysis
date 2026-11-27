@@ -5,11 +5,11 @@ Usage: DATABASE_URL=... uv run python -m scripts.vn_stock_daily_price_store [inp
 Default: out/vn_stock_latest_prices.json
 Per symbol, only the newest bar of the file is upserted: a row with the same (symbol, date) is overwritten, so running
 it twice stores the same data once. The older bars are evidence only (`libs/prices/adjustment.py`): when the source's
-bars are the stored ones times one factor, every stored bar of the symbol up to the last changed one is multiplied by
-it (volume unchanged), the source's own bars replace those it returned, and the adjustment is logged in
+bars are the stored ones times one factor, every stored bar of the symbol up to the last changed one is multiplied by it
+(volume unchanged), the source's own bars replace those it returned, and the adjustment is logged in
 `vn_stock_price_adjustments`, all in the same transaction as the upsert. Bars that moved in another way are logged as a
-warning and left alone. More than MAX_ADJUSTED symbols adjusted in one run stores nothing: that is a source changing its
-quotes, not dividends.
+warning and left alone, the newest bar too when its date is already stored. More than MAX_ADJUSTED symbols adjusted in
+one run stores nothing: that is a source changing its quotes, not dividends.
 Exit 0 = rows stored, 4 = the file holds no price (nothing stored), anything else = crash.
 """
 
@@ -76,11 +76,14 @@ def store(prices: list[Price], engine: Engine, log: Logger = logger) -> list[Adj
         for row in connection.execute(query).mappings():
             stored[row["symbol"]][row["date"]] = Price.model_validate(dict(row))
         adjustments = []
+        newest = {symbol: bars[-1] for symbol, bars in by_symbol.items()}
         for symbol, bars in by_symbol.items():
             try:
                 adjustment = detect(bars, stored[symbol])
             except InconsistentBars as error:
                 log.warning("not adjusted: %s", error)
+                if bars[-1].date in stored[symbol]:  # it may be a lone adjusted bar: keep the stored one
+                    del newest[symbol]
                 continue
             if adjustment:
                 adjustments.append(adjustment)
@@ -98,7 +101,8 @@ def store(prices: list[Price], engine: Engine, log: Logger = logger) -> list[Adj
                 adjustment.source,
                 bars,
             )
-        _upsert(connection, [bars[-1] for bars in by_symbol.values()])
+        if newest:
+            _upsert(connection, list(newest.values()))
     return adjustments
 
 
