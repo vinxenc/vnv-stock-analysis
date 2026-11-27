@@ -45,30 +45,26 @@ jobs:
           success-message: Dependencies installed
           failure-message: Pipeline failed, can not install dependencies
 
-  # The session to fetch: the working day after the newest row of vn_stock_price_sync_history, not the wall-clock
-  # day, so a run GitHub delays past midnight still fetches the right one. Its `session` output (empty when nothing is
-  # due: a day off, or the session already stored) is the SESSION of every job below; a rerun of a failed job keeps it.
+  # The sessions to fetch: from the working day after the newest row of vn_stock_price_sync_history to the newest
+  # closed session, not the wall-clock day, so a run GitHub delays past midnight still fetches the right one and a
+  # run after a failed one catches every missed session up. Its `sessions` output (`first..last`, empty when nothing
+  # is due: a day off, or the newest session already stored) is the SESSIONS of every job below; a rerun of a failed
+  # job keeps it.
   next_session:
     needs: install
     runs-on: ubuntu-latest
     environment: production  # DATABASE_URL is an environment secret, limited to master
     outputs:
-      session: ${{ steps.next.outputs.session }}
+      sessions: ${{ steps.next.outputs.sessions }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-env
-      - name: Find the session due
+      - name: Find the sessions due
         id: next
-        # exit 0 writes session=YYYY-MM-DD to $GITHUB_OUTPUT, 5 = nothing due; any other code fails the job
-        run: |
-          rc=0
-          uv run --no-sync python -m scripts.vn_stock_price_sync_session || rc=$?
-          case "$rc" in
-            0|5) ;;
-            *) exit "$rc" ;;
-          esac
+        # writes sessions=YYYY-MM-DD..YYYY-MM-DD to $GITHUB_OUTPUT, nothing when nothing is due
+        run: uv run --no-sync python -m scripts.vn_stock_price_sync_session
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - if: always()
@@ -76,16 +72,16 @@ jobs:
         with:
           pipeline: next_session
           job-status: ${{ job.status }}
-          success-message: ${{ steps.next.outputs.session && format('Session due {0}', steps.next.outputs.session) || 'No session due (a day off, or already stored), pipeline will ignore' }}
-          failure-message: Pipeline failed, can not find the session due
-          success-level: ${{ steps.next.outputs.session && 'info' || 'warning' }}
+          success-message: ${{ steps.next.outputs.sessions && format('Sessions due {0}', steps.next.outputs.sessions) || 'No session due (a day off, or already stored), pipeline will ignore' }}
+          failure-message: Pipeline failed, can not find the sessions due
+          success-level: ${{ steps.next.outputs.sessions && 'info' || 'warning' }}
 
-  # Before the retrieval: the symbols whose ex-rights date (GDKHQ) is the session get their whole history (from 2019)
-  # re-stored as the source adjusts it. A failure stops the sync: the session stays due until a rerun.
+  # Before the retrieval: the symbols whose ex-rights date (GDKHQ) falls from the first session to today get their
+  # whole history (from 2019) re-stored as the source adjusts it. A failure stops the sync: the sessions stay due.
   dividend_history:
     name: vn stock dividend history
     needs: next_session
-    if: needs.next_session.outputs.session != ''
+    if: needs.next_session.outputs.sessions != ''
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: production  # DATABASE_URL is an environment secret, limited to master
@@ -94,23 +90,23 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-env
-      - name: Re-store the history of the session's ex-rights symbols
+      - name: Re-store the history of the sessions' ex-rights symbols
         run: uv run --no-sync python -m scripts.vn_stock_dividend_history
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          SESSION: ${{ needs.next_session.outputs.session }}
+          SESSIONS: ${{ needs.next_session.outputs.sessions }}
       - if: always()
         uses: ./.github/actions/pipeline-state
         with:
           pipeline: dividend_history
           job-status: ${{ job.status }}
-          success-message: Re-stored the history of the session's ex-rights symbols
-          failure-message: Pipeline failed, can not re-store the history of the session's ex-rights symbols
+          success-message: Re-stored the history of the sessions' ex-rights symbols
+          failure-message: Pipeline failed, can not re-store the history of the sessions' ex-rights symbols
 
   retrieve_prices:
     name: vn stock latest price retrieval
     needs: [next_session, dividend_history]
-    if: needs.next_session.outputs.session != ''
+    if: needs.next_session.outputs.sessions != ''
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -119,10 +115,10 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-env
       - name: Retrieve latest prices
-        # exits 0 with a JSON file of the session's bars, 4 when no symbol (or under 90%) has one; any non-zero code fails
+        # exits 0 with a JSON file of the sessions' bars, 4 when no session has bars of 90% of the symbols; else fails
         run: uv run --no-sync python -m scripts.vn_stock_latest_price_retrieval
         env:
-          SESSION: ${{ needs.next_session.outputs.session }}
+          SESSIONS: ${{ needs.next_session.outputs.sessions }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: vn-stock-latest-prices

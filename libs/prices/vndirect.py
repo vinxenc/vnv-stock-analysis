@@ -1,6 +1,6 @@
 from datetime import date
 
-from .base import Price, PriceNotFoundError, PriceSource, http_get_json, validate_symbol
+from .base import Price, PriceSource, http_get_json, validate_symbol
 
 EX_RIGHTS = ("DIVIDEND", "STOCKDIV", "KINDDIV", "ISSUE")  # cash, stock dividend, bonus shares, rights issue
 
@@ -8,22 +8,13 @@ EX_RIGHTS = ("DIVIDEND", "STOCKDIV", "KINDDIV", "ISSUE")  # cash, stock dividend
 class VNDirect(PriceSource):
     name = "VNDirect"
 
-    def get_latest_price(self, symbol: str) -> Price:
-        rows = self._rows(symbol, "sort=date:desc", "", 1)
-        if not rows:
-            raise PriceNotFoundError(f"no data for {symbol} (unknown ticker?)")
-        return rows[0]
-
     def get_history(self, symbol: str, start: date, end: date) -> list[Price]:
-        return sorted(self._rows(symbol, "sort=date", f"~date:gte:{start}~date:lte:{end}", 10000), key=lambda p: p.date)
-
-    def _rows(self, symbol: str, sort: str, dates: str, size: int) -> list[Price]:
         symbol = validate_symbol(symbol)
         rows = http_get_json(
-            f"https://api-finfo.vndirect.com.vn/v4/stock_prices?{sort}&q=code:{symbol}{dates}&size={size}"
-        )
+            f"https://api-finfo.vndirect.com.vn/v4/stock_prices?q=code:{symbol}~date:gte:{start}~date:lte:{end}&size=10000"
+        )["data"]
         # ad* = adjusted for dividends/splits, matching DNSE and VPS; plain open/close are raw
-        return [
+        prices = [
             Price.model_validate(
                 dict(
                     symbol=symbol,
@@ -36,8 +27,9 @@ class VNDirect(PriceSource):
                     volume=row["nmVolume"],
                 )
             )
-            for row in rows["data"]
+            for row in rows
         ]
+        return sorted(prices, key=lambda price: price.date)  # VNDirect may answer in descending order
 
     def get_ex_rights(self, day: date) -> set[str]:
         """The symbols, of every exchange, whose ex-rights date (GDKHQ) is `day` for an event that moves the price:

@@ -6,6 +6,7 @@ import pytest
 from libs.prices import DNSE, Price, PriceNotFoundError, PriceSource
 
 TARGET = "libs.prices.dnse.http_get_json"
+OCTOBER = (date(2026, 10, 1), date(2026, 10, 31))
 
 
 def ts(*args: int) -> int:
@@ -18,7 +19,7 @@ def http_error(code: int) -> niquests.HTTPError:
     return niquests.HTTPError(response=response)
 
 
-# two sessions; the second one is the latest and must be picked
+# two sessions of October 2026
 PAYLOAD = {
     "t": [ts(2026, 10, 22, 3), ts(2026, 10, 23, 3)],
     "o": [58.0, 57.2],
@@ -29,27 +30,22 @@ PAYLOAD = {
 }
 
 
-def test_get_latest_price(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_history_asks_for_the_whole_span_in_vietnam_time(monkeypatch: pytest.MonkeyPatch) -> None:
     urls: list[str] = []
     monkeypatch.setattr(TARGET, lambda url: urls.append(url) or PAYLOAD)
     source = DNSE()
 
-    price = source.get_latest_price("fpt")
+    bars = source.get_history("fpt", *OCTOBER)
 
     assert isinstance(source, PriceSource)
-    assert price == Price.model_validate(
-        dict(
-            symbol="FPT",
-            source="DNSE",
-            date=date(2026, 10, 23),
-            open=57.2,
-            high=57.2,
-            low=56.6,
-            close=57.0,
-            volume=7090600,
-        )
-    )
-    assert urls[0].startswith("https://services.entrade.com.vn/") and "symbol=FPT&" in urls[0]
+    assert bars[-1] == Price.model_validate(
+        dict(symbol="FPT", source="DNSE", date=date(2026, 10, 23), open=57.2, high=57.2, low=56.6, close=57.0,
+             volume=7090600)
+    )  # fmt: skip
+    assert [bar.date for bar in bars] == [date(2026, 10, 22), date(2026, 10, 23)]
+    assert all(OCTOBER[0] <= bar.date <= OCTOBER[1] for bar in bars)
+    assert urls[0].startswith("https://services.entrade.com.vn/")
+    assert f"from={ts(2026, 9, 30, 17)}&to={ts(2026, 10, 31, 16, 59, 59)}&symbol=FPT&" in urls[0]
 
 
 def test_date_uses_vietnam_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -57,14 +53,12 @@ def test_date_uses_vietnam_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
     data = {"t": [ts(2026, 10, 22, 18)], "o": [1], "h": [1], "l": [1], "c": [1], "v": [1]}
     monkeypatch.setattr(TARGET, lambda url: data)
 
-    assert DNSE().get_latest_price("FPT").date == date(2026, 10, 23)
+    assert [bar.date for bar in DNSE().get_history("FPT", *OCTOBER)] == [date(2026, 10, 23)]
 
 
-def test_empty_payload_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(TARGET, lambda url: {"t": []})
-
-    with pytest.raises(PriceNotFoundError, match="ZZZ"):
-        DNSE().get_latest_price("ZZZ")
+def test_get_history_of_a_year_before_the_listing_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(TARGET, lambda url: {"t": [], "o": [], "h": [], "l": [], "c": [], "v": []})
+    assert DNSE().get_history("FPT", date(2019, 1, 1), date(2019, 12, 31)) == []
 
 
 def test_invalid_symbol_rejected_before_any_request(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -74,7 +68,7 @@ def test_invalid_symbol_rejected_before_any_request(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(TARGET, boom)
 
     with pytest.raises(PriceNotFoundError, match="invalid symbol"):
-        DNSE().get_latest_price("FPT&x=1")
+        DNSE().get_history("FPT&x=1", *OCTOBER)
 
 
 @pytest.mark.parametrize("code", [400, 404])
@@ -85,7 +79,7 @@ def test_unknown_ticker_http_errors_become_not_found(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(TARGET, fail)
 
     with pytest.raises(PriceNotFoundError, match=str(code)):
-        DNSE().get_latest_price("ZZZ")
+        DNSE().get_history("ZZZ", *OCTOBER)
 
 
 def test_other_http_errors_propagate(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -95,33 +89,14 @@ def test_other_http_errors_propagate(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(TARGET, fail)
 
     with pytest.raises(niquests.HTTPError):
-        DNSE().get_latest_price("FPT")
+        DNSE().get_history("FPT", *OCTOBER)
 
 
-def test_an_invalid_latest_bar_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(TARGET, lambda url: {**PAYLOAD, "c": [57.4, 0]})
-    with pytest.raises(ValueError, match="close"):
-        DNSE().get_latest_price("FPT")
-
-
-def test_get_history_asks_for_the_whole_span_in_vietnam_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    urls: list[str] = []
-    monkeypatch.setattr(TARGET, lambda url: urls.append(url) or PAYLOAD)
-    bars = DNSE().get_history("fpt", date(2019, 1, 1), date(2019, 12, 31))
-    assert [(bar.date, bar.close) for bar in bars] == [(date(2026, 10, 22), 57.4), (date(2026, 10, 23), 57.0)]
-    assert f"from={ts(2018, 12, 31, 17)}&to={ts(2019, 12, 31, 16, 59, 59)}&symbol=FPT&" in urls[0]
-
-
-def test_get_history_of_a_year_before_the_listing_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(TARGET, lambda url: {"t": [], "o": [], "h": [], "l": [], "c": [], "v": []})
-    assert DNSE().get_history("FPT", date(2019, 1, 1), date(2019, 12, 31)) == []
-
-
-def test_an_invalid_older_bar_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(TARGET, lambda url: {**PAYLOAD, "c": [0, 57.0]})
-    assert [bar.date for bar in DNSE().get_history("FPT", date(2026, 10, 1), date(2026, 10, 31))] == [
-        date(2026, 10, 23)
-    ]
+@pytest.mark.parametrize("closes", [[57.4, 0], [0, 57.0]])
+def test_an_invalid_bar_is_dropped(monkeypatch: pytest.MonkeyPatch, closes: list[float]) -> None:
+    """A halted day (a price of 0), the last of a span or not, must not fail the whole span."""
+    monkeypatch.setattr(TARGET, lambda url: {**PAYLOAD, "c": closes})
+    assert len(DNSE().get_history("FPT", *OCTOBER)) == 1
 
 
 def test_two_bars_of_one_date_keep_the_later_one(monkeypatch: pytest.MonkeyPatch) -> None:

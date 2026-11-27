@@ -7,8 +7,8 @@ from sqlmodel import Session, select
 
 from libs.db.models import Price
 from libs.prices import PriceNotFoundError, PriceSource
-from scripts.vn_stock_daily_price_store import store
-from scripts.vn_stock_dividend_history import fetch, main
+from scripts.vn_stock_daily_price_store import upsert
+from scripts.vn_stock_dividend_history import ex_rights, fetch, main
 
 TODAY = dt.date(2021, 6, 15)
 
@@ -26,9 +26,6 @@ class FakeSource(PriceSource):
         self.name, self.fails, self.listed = name, fails, listed
         self.calls: list[tuple[str, dt.date, dt.date]] = []
 
-    def get_latest_price(self, symbol: str) -> Price:
-        raise AssertionError("not used")
-
     def get_history(self, symbol: str, start: dt.date, end: dt.date) -> list[Price]:
         self.calls.append((symbol, start, end))
         if start.year == self.fails:
@@ -37,18 +34,24 @@ class FakeSource(PriceSource):
 
 
 class FakeCalendar:
-    def __init__(self, *symbols: str) -> None:
-        self.symbols = set(symbols)
+    """`symbols` on every day asked for, or only on `on`; `errors` failures first."""
+
+    def __init__(self, *symbols: str, on: dt.date | None = None, errors: int = 0) -> None:
+        self.symbols, self.on, self.errors = set(symbols), on, errors
         self.days: list[dt.date] = []
 
     def get_ex_rights(self, day: dt.date) -> set[str]:
         self.days.append(day)
-        return self.symbols
+        if self.errors:
+            self.errors -= 1
+            raise ConnectionError("VNDirect down")
+        return self.symbols if self.on in (None, day) else set()
 
 
 @pytest.fixture(autouse=True)
 def no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fetch.retry, "sleep", lambda seconds: None)
+    monkeypatch.setattr(ex_rights.retry, "sleep", lambda seconds: None)
 
 
 @pytest.fixture
@@ -58,14 +61,26 @@ def symbols_csv(tmp_path: Path) -> Path:
     return path
 
 
+def store(prices: list[Price], engine: Engine) -> None:
+    with engine.begin() as connection:
+        upsert(connection, prices)
+
+
 def stored(engine: Engine) -> list[tuple[str, str, float, str]]:
     with Session(engine) as session:
         rows = session.exec(select(Price).order_by(Price.symbol, Price.date))
         return [(row.symbol, str(row.date), row.close, row.source) for row in rows]
 
 
-def run(symbols_csv: Path, engine: Engine | None, *sources: PriceSource, calendar: FakeCalendar) -> int:
-    return main(symbols_csv, engine, TODAY, sources, calendar, delay=0, sleep=lambda seconds: None)
+def run(
+    symbols_csv: Path,
+    engine: Engine | None,
+    *sources: PriceSource,
+    calendar: FakeCalendar,
+    sessions: tuple[dt.date, dt.date] = (TODAY, TODAY),
+    today: dt.date = TODAY,
+) -> int:
+    return main(symbols_csv, engine, sessions, sources, calendar, delay=0, sleep=lambda seconds: None, today=today)
 
 
 def test_no_ex_rights_today_touches_nothing(symbols_csv: Path) -> None:
@@ -126,3 +141,40 @@ def test_an_unknown_ticker_is_not_retried(symbols_csv: Path, engine: Engine) -> 
     with pytest.raises(RuntimeError, match="PriceNotFoundError"):
         run(symbols_csv, engine, source, calendar=FakeCalendar("FPT"))
     assert len(source.calls) == 1
+
+
+def test_the_calendar_is_retried(symbols_csv: Path) -> None:
+    calendar = FakeCalendar(errors=2)
+    assert run(symbols_csv, None, FakeSource("DNSE"), calendar=calendar) == 0
+    assert calendar.days == [TODAY] * 3
+
+
+def test_every_day_from_the_first_session_to_today_is_asked(symbols_csv: Path, engine: Engine) -> None:
+    """Caught up on Monday 06-14 on Wednesday 06-16: an ex-rights date on 06-16 counts, its history is re-stored up to
+    the last session, as the sources already adjust it."""
+    calendar = FakeCalendar("FPT", on=dt.date(2021, 6, 16))
+    dnse = FakeSource("DNSE")
+    monday = dt.date(2021, 6, 14)
+    assert run(symbols_csv, engine, dnse, calendar=calendar, sessions=(monday, TODAY), today=dt.date(2021, 6, 16)) == 0
+    assert calendar.days == [monday, TODAY, dt.date(2021, 6, 16)]
+    assert dnse.calls[-1] == ("FPT", dt.date(2021, 1, 1), TODAY)
+
+
+def test_stale_rows_are_deleted_only_within_the_years_returned(symbols_csv: Path, engine: Engine) -> None:
+    class TwoBars(FakeSource):
+        """The first and last day of each year asked for, nothing in 2020 (a glitch, or a halted year)."""
+
+        def get_history(self, symbol: str, start: dt.date, end: dt.date) -> list[Price]:
+            return [] if start.year == 2020 else [bar(symbol, start, 9.0), bar(symbol, end, 9.0)]
+
+    stale = [bar("FPT", dt.date(2019, 6, 3), 10.0, "VNDirect"), bar("FPT", dt.date(2020, 6, 3), 10.0, "VNDirect")]
+    store([*stale, bar("VPX", dt.date(2019, 6, 3), 5.0)], engine)
+    assert run(symbols_csv, engine, TwoBars("DNSE"), calendar=FakeCalendar("FPT")) == 0
+    assert stored(engine) == [
+        ("FPT", "2019-01-01", 9.0, "DNSE"),  # 2019-06-03 deleted: DNSE has no bar there
+        ("FPT", "2019-12-31", 9.0, "DNSE"),
+        ("FPT", "2020-06-03", 10.0, "VNDirect"),  # 2020 returned nothing: kept
+        ("FPT", "2021-01-01", 9.0, "DNSE"),
+        ("FPT", "2021-06-15", 9.0, "DNSE"),
+        ("VPX", "2019-06-03", 5.0, "DNSE"),  # another symbol: untouched
+    ]

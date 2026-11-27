@@ -40,9 +40,9 @@ class ScreenHistory(SQLModel, table=True):
 
 
 class PriceSyncHistory(SQLModel, table=True):
-    """The sessions the price sync has stored, one row per session, written with the prices in one transaction. The
-    next run fetches the working day after the newest one (never the wall-clock day: a delayed cron run must not skip
-    or double a session)."""
+    """The newest session of each price sync run, written with the prices in one transaction. The next run fetches
+    from the working day after the newest one (never the wall-clock day: a delayed cron run must not skip or double a
+    session)."""
 
     __tablename__ = "vn_stock_price_sync_history"
 

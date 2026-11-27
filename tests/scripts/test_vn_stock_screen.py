@@ -255,7 +255,7 @@ def test_main_catches_up_one_session_at_a_time(tmp_path: Path, engine: Engine) -
 def before_test(engine: Engine) -> Engine:
     """Runs before `test_screen`: fills the empty test database with real DNSE history of HPG and AAM (tests/data),
     independent of the seed migration. Put any other setup that test needs here."""
-    price_store.store(price_store.read_prices(Path("tests/data/prices_hpg_aam.json")), engine)
+    price_store.main(Path("tests/data/prices_hpg_aam.json"), engine)
     return engine
 
 

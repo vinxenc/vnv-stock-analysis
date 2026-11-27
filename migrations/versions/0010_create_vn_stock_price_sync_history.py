@@ -1,10 +1,9 @@
 """create vn_stock_price_sync_history
 
-The sessions the price sync has stored, like `vn_stock_screen_history` for the screen: the next run fetches the
+The sessions the price sync has stored, like `vn_stock_screen_history` for the screen: the next run fetches from the
 working day after the newest one, so a run that GitHub delays past midnight still fetches the right session. Seeded
-with 2026-11-20, the baseline: the next run fetches the working day after it (2026-11-23), so the sessions of the
-week of 2026-11-23, and their ex-rights symbols, are synced again by hand, one run each. Older ex-rights dates are
-left as they are.
+with 2026-11-20, the baseline: the first run fetches every session from the working day after it (2026-11-23) to the
+newest closed one, with their ex-rights symbols. Older ex-rights dates are left as they are.
 
 Revision ID: 0010
 Revises: 0009

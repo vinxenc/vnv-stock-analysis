@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 import os
 import subprocess
@@ -10,7 +11,7 @@ from sqlalchemy import Engine
 from sqlmodel import Session, select
 
 from libs.db.models import Price, PriceSyncHistory
-from scripts.vn_stock_daily_price_store import NO_DATA, main, read_prices
+from scripts.vn_stock_daily_price_store import NO_DATA, main, read_prices, upsert
 
 
 def row(symbol: str, close: float = 2.0, date: str = "2026-10-23", source: str = "A") -> dict[str, object]:
@@ -52,9 +53,10 @@ def test_main_inserts_rows(tmp_path: Path, engine: Engine) -> None:
 
 def test_main_twice_overwrites_same_symbol_and_date(tmp_path: Path, engine: Engine) -> None:
     main(write_json(tmp_path / "1.json", row("AAA", close=2), row("BBB")), engine)
-    main(write_json(tmp_path / "2.json", row("AAA", close=9, source="B")), engine)
+    main(write_json(tmp_path / "2.json", row("AAA", close=9, source="B"), row("AAA", date="2026-10-24")), engine)
     assert [(price.symbol, str(price.date), price.close, price.source) for price in stored(engine)] == [
         ("AAA", "2026-10-23", 9.0, "B"),
+        ("AAA", "2026-10-24", 2.0, "A"),
         ("BBB", "2026-10-23", 2.0, "A"),
     ]
 
@@ -66,10 +68,21 @@ def test_main_records_the_session_with_the_prices(tmp_path: Path, engine: Engine
         assert [str(day) for day in session.exec(select(PriceSyncHistory.date))] == ["2026-10-23"]
 
 
-def test_main_two_sessions_in_one_file_store_nothing(tmp_path: Path, engine: Engine) -> None:
-    with pytest.raises(ValueError, match="2 sessions"):
-        main(write_json(tmp_path / "p.json", row("AAA"), row("BBB", date="2026-10-24")), engine)
-    assert stored(engine) == []
+def test_main_several_sessions_record_the_newest(tmp_path: Path, engine: Engine) -> None:
+    rows = [row("AAA", date="2026-10-26"), row("AAA"), row("BBB", date="2026-10-26")]
+    assert main(write_json(tmp_path / "p.json", *rows), engine) == 0
+    assert len(stored(engine)) == 3
+    with Session(engine) as session:
+        assert [str(day) for day in session.exec(select(PriceSyncHistory.date))] == ["2026-10-26"]
+
+
+def test_a_large_upsert_is_chunked(engine: Engine) -> None:
+    """One INSERT of 10,000 rows would pass Postgres' 65,535 parameters."""
+    start = dt.date(2000, 1, 1)
+    prices = [Price.model_validate(row("AAA", date=str(start + dt.timedelta(days=day)))) for day in range(10_000)]
+    with engine.begin() as connection:
+        upsert(connection, prices)
+    assert len(stored(engine)) == 10_000
 
 
 def test_main_bad_row_stores_nothing(tmp_path: Path, engine: Engine) -> None:
