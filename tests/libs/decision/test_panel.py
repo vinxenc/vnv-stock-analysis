@@ -93,7 +93,8 @@ def test_no_bar_after_t_changes_the_inputs(engine: Engine) -> None:
 
 def test_the_universe_is_the_screens(engine: Engine) -> None:
     days = seed(engine, "AAA", 60)
-    seed(engine, "TINY", 60, volume=10)
+    for n in range(10):  # ten, so HALT's one missing bar stays within MIN_COVERAGE
+        seed(engine, f"TINY{n}", 60, volume=10)
     seed(engine, "HALT", 59)  # no bar on the last day
     with engine.begin() as connection:  # traded nothing on day 30
         connection.execute(
@@ -125,6 +126,17 @@ def test_an_empty_session_is_skipped(engine: Engine) -> None:
     assert build(engine) == []
 
 
+def test_a_session_the_screen_refuses_is_skipped(engine: Engine) -> None:
+    days = seed(engine, "AAA", 30)
+    seed(engine, "BBB", 30, phase=1.0)
+    seed(engine, "CCC", 30, phase=2.0)
+    with engine.begin() as connection:  # a partial sync on day 20: 1 of the 3 symbols
+        connection.execute(text("DELETE FROM vn_stock_prices WHERE symbol <> 'AAA' AND date = :d"), {"d": days[20]})
+    kept = {row["date"] for row in panel.build_panel(engine, FIRST, days[-1], lambda day: day != days[25], ENGINE)}
+    assert days[20] not in kept and days[25] not in kept  # the partial sync, and a day off
+    assert {days[19], days[21], days[24], days[26]} <= kept
+
+
 # The Python label of the panel equals the SQL label of the decisions on every rule of `_FILL` (test_outcome.py).
 S = [dt.date(2026, 11, d) for d in (2, 3, 4, 5, 6, 9, 10, 11)]
 
@@ -145,7 +157,7 @@ SCENARIOS = {
     "gap left empty": ({"X": path(10.0, 11.0, 11.0, 11.0, 11.0, 11.0)}, ()),
     "missing bar": ({"X": path(10.0, 10.0, None, 10.0, 10.0, 10.5)}, ()),
     "halted on t+5": ({"X": path(10.0, 10.0, 10.0, 10.0, 10.0, None, 10.5)}, ()),
-    "t+5 not stored": ({"X": path(10.0, 10.0, 10.0, 10.0)}, ()),
+    "t+5 not stored": ({"X": path(10.0, 10.0, 10.0, 10.0), "M": path(1.0, 1.0, 1.0, 1.0)}, ()),  # 4 sessions in all
 }
 
 
@@ -228,6 +240,7 @@ def test_the_lookahead_check(engine: Engine) -> None:
         " WHERE date = :t AND symbol = 'AAA'"
     )
     assert len(wrong) == 1 and "AAA #12" in wrong[0]
+    assert panel.lookahead_check(engine, ENGINE, skip={days[-1]}) == (2, [])  # an explained session is left out
     extra = edit(
         "UPDATE vn_stock_rankings SET indicators = jsonb_set(indicators, '{0,raw,extra}', '\"x\"')"
         " WHERE date = :t AND symbol = 'BBB'"

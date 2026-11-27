@@ -37,7 +37,7 @@ jobs:
         with:
           dev: true
       - name: Ruff check
-        run: uv run ruff check libs scripts tests
+        run: uv run ruff check libs scripts tests research
 
   test:
     name: Unit tests + coverage

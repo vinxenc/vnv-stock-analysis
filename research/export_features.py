@@ -4,9 +4,11 @@ Usage: DATABASE_URL=... uv run python -m research.export_features [output_csv]
 Default: out/features.csv. The panel starts on the 70th stored session (the longest lookback of the 21 inputs) and ends
 on the newest one; the last 5 sessions have no labels. Exit 1 when the look-ahead check finds a difference or has no
 stored ranking to compare with (it then proves nothing): run it against a database whose `vn_stock_rankings` is filled.
+The sessions of EXPLAINED are left out of the check. Exit 1 too when fewer than WARM_UP sessions are stored.
 """
 
 import csv
+import datetime as dt
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -23,6 +25,13 @@ from scripts.vn_holiday import off_reason
 
 WARM_UP = 70  # sessions: the most rows any of the 21 inputs needs (#9, #11, #24)
 COLUMNS = ["date", "symbol", "turnover", *panel.INPUTS.values(), "score", *panel.LABELS]
+# Sessions whose differences are explained by a stored bar that changed after the live run (Phase 3 step 1, production
+# run of 2026-11-27): DNSE serves the eve of an ex-date already adjusted after midnight and the sync re-stores it.
+# ponytail: one entry per such eve until the price pipeline stops re-storing them; then this list is only history.
+EXPLAINED = {
+    dt.date(2026, 11, 25): "BVH 2026-11-25 re-stored 56.9 -> 56.09 at 01:12 VN",
+    dt.date(2026, 11, 26): "FPT 2026-11-26 re-stored 44.5 -> 43.5 at 00:54 VN",
+}
 log = LogxideLogger("export_features")
 
 
@@ -34,13 +43,17 @@ def share(rows: list[dict], label: str) -> str:
 def main(output_csv: Path = Path("out/features.csv")) -> int:
     engine = connect()
     with engine.connect() as connection:
-        start, end = connection.execute(
+        found = connection.execute(
             text(
                 "SELECT date, (SELECT max(date) FROM vn_stock_prices) FROM (SELECT DISTINCT date FROM vn_stock_prices)"
                 " AS d ORDER BY date OFFSET :skip LIMIT 1"
             ),
             {"skip": WARM_UP - 1},
-        ).one()
+        ).one_or_none()
+    if found is None:
+        log.error(f"fewer than {WARM_UP} stored sessions: no panel")
+        return 1
+    start, end = found
     indicators = TalibIndicators()
     prices = panel.load_prices(engine)  # read once, for the panel and the check
     rows = panel.build_panel(engine, start, end, lambda day: off_reason(day) is None, indicators, prices)
@@ -73,8 +86,9 @@ def main(output_csv: Path = Path("out/features.csv")) -> int:
     counts = f"median {median(per_session)}, min {min(per_session)}" if per_session else "no session"
     log.info(f"candidates (score >= {MIN_SCORE}) per session: {counts}, sessions with none {per_session.count(0)}")
 
-    compared, mismatches = panel.lookahead_check(engine, indicators, prices)
+    compared, mismatches = panel.lookahead_check(engine, indicators, prices, EXPLAINED)
     log.info(f"look-ahead check: {compared} sessions of vn_stock_rankings compared, {len(mismatches)} differences")
+    log.info(f"left out, explained: {', '.join(f'{day} ({why})' for day, why in EXPLAINED.items())}")
     for line in mismatches[:50]:
         log.info("  " + line)
     return 0 if compared and not mismatches else 1

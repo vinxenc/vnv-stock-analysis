@@ -1,8 +1,10 @@
 """The feature panel of Phase 3 (docs/plans/phase-3-logistic-regression-score.md, step 1), also TabICL's context.
 
-Replays the live run on every past session t: the screen's universe (`MIN_TURNOVER` over `TURNOVER_SESSIONS` rows, a
-traded bar on t), then the scoring of `libs/analysis` on each symbol's last `HISTORY_SESSIONS` bars up to t, the same
-window `vn_stock_get_history` gives the live run (RSI and PPO are recursive, so a longer window would change them).
+Replays the live run on every past session t the screen would have screened (a working day, `MIN_COVERAGE` of the
+previous stored session's symbols with a bar on t): the screen's universe (`MIN_TURNOVER` over `TURNOVER_SESSIONS`
+rows, a traded bar on t), then the scoring of `libs/analysis` on each symbol's last `HISTORY_SESSIONS` bars up to t,
+the same window `vn_stock_get_history` gives the live run (RSI and PPO are recursive, so a longer window would change
+them).
 One row per (date, symbol): the 21 raw inputs, the 0-100 `score` and the forward labels of `libs/decision/outcome.py`.
 Main dependencies only (CI tests it without the `research` group): plain dicts, no pandas.
 """
@@ -10,7 +12,7 @@ Main dependencies only (CI tests it without the `research` group): plain dicts, 
 import datetime as dt
 import math
 from bisect import bisect_right
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from statistics import median
 
 from sqlalchemy import Engine
@@ -20,7 +22,7 @@ from libs.analysis import scoring
 from libs.analysis.features import Candles, Detection, mean
 from libs.analysis.models import IndicatorResult
 from libs.analysis.report import symbol_result
-from libs.constants import HISTORY_SESSIONS, MIN_TURNOVER, TURNOVER_SESSIONS
+from libs.constants import HISTORY_SESSIONS, MIN_COVERAGE, MIN_TURNOVER, TURNOVER_SESSIONS
 from libs.db.models import Price, Ranking
 from libs.decision.outcome import outcome
 from libs.indicators import Indicators
@@ -84,15 +86,23 @@ def build_panel(
     indicators: Indicators,
     prices: Prices | None = None,
 ) -> list[dict]:
-    """One row per (date, symbol) of the universe, for every stored session in [start, end]. A cell is None when it
-    cannot be computed; the labels are None until t+5 is stored (and wherever `outcome` leaves them empty)."""
+    """One row per (date, symbol) of the universe, for every stored session in [start, end] that `screen` would accept
+    (a working day, not a partial sync). A cell is None when it cannot be computed; the labels are None until t+5 is
+    stored (and wherever `outcome` leaves them empty). A skipped session still counts in t+5, as in `_FILL`."""
     prices = prices if prices is not None else load_prices(engine)
     dates = {symbol: [row.date for row in rows] for symbol, rows in prices.items()}
     closes = {symbol: {row.date: row.close for row in rows} for symbol, rows in prices.items()}
     sessions = sorted({day for days in dates.values() for day in days})
+    on: dict[dt.date, set[str]] = {}  # session -> symbols with a bar
+    for symbol, days in dates.items():
+        for day in days:
+            on.setdefault(day, set()).add(symbol)
     panel = []
     for index, t in enumerate(sessions):
-        if not start <= t <= end:
+        if not start <= t <= end or not is_working_day(t):
+            continue
+        before = on[sessions[index - 1]] if index else set()
+        if len(on[t] & before) < MIN_COVERAGE * len(before):  # a partial sync, which `screen` refuses
             continue
         rows = []
         for symbol, (raws, _, turnover, score) in replay(prices, dates, t, indicators).items():
@@ -139,10 +149,13 @@ def _same(stored: dict, expected: dict) -> bool:
     return True
 
 
-def lookahead_check(engine: Engine, indicators: Indicators, prices: Prices | None = None) -> tuple[int, list[str]]:
+def lookahead_check(
+    engine: Engine, indicators: Indicators, prices: Prices | None = None, skip: Collection[dt.date] = ()
+) -> tuple[int, list[str]]:
     """Replay every session of `vn_stock_rankings` and compare each stored indicator's `raw` with the replayed one.
     Returns (sessions compared, mismatches as readable lines). Zero sessions compared proves nothing. `prices`: what
-    `load_prices` returned, to read the table once."""
+    `load_prices` returned, to read the table once. `skip`: sessions whose differences are already explained (a stored
+    bar changed after the live run), left out of the comparison and of the count."""
     with Session(engine) as session:
         stored = session.exec(select(Ranking.date, Ranking.symbol, Ranking.indicators).order_by(Ranking.date)).all()
     prices = prices if prices is not None else load_prices(engine)
@@ -150,6 +163,8 @@ def lookahead_check(engine: Engine, indicators: Indicators, prices: Prices | Non
     mismatches: list[str] = []
     by_session: dict[dt.date, list[tuple[str, list[dict]]]] = {}
     for day, symbol, items in stored:
+        if day in skip:
+            continue
         by_session.setdefault(day, []).append((symbol, items))
     for day, symbols in by_session.items():
         replayed = replay(prices, dates, day, indicators)
