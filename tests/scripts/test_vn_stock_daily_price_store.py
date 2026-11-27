@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from libs.db.models import Price
+from libs.db.models import Price, PriceSyncHistory
 from scripts.vn_stock_daily_price_store import NO_DATA, main, read_prices
 
 
@@ -52,12 +52,24 @@ def test_main_inserts_rows(tmp_path: Path, engine: Engine) -> None:
 
 def test_main_twice_overwrites_same_symbol_and_date(tmp_path: Path, engine: Engine) -> None:
     main(write_json(tmp_path / "1.json", row("AAA", close=2), row("BBB")), engine)
-    main(write_json(tmp_path / "2.json", row("AAA", close=9, source="B"), row("AAA", date="2026-10-24")), engine)
+    main(write_json(tmp_path / "2.json", row("AAA", close=9, source="B")), engine)
     assert [(price.symbol, str(price.date), price.close, price.source) for price in stored(engine)] == [
         ("AAA", "2026-10-23", 9.0, "B"),
-        ("AAA", "2026-10-24", 2.0, "A"),
         ("BBB", "2026-10-23", 2.0, "A"),
     ]
+
+
+def test_main_records_the_session_with_the_prices(tmp_path: Path, engine: Engine) -> None:
+    assert main(write_json(tmp_path / "p.json", row("AAA"), row("BBB")), engine) == 0
+    assert main(write_json(tmp_path / "p.json", row("AAA")), engine) == 0  # a rerun records it once
+    with Session(engine) as session:
+        assert [str(day) for day in session.exec(select(PriceSyncHistory.date))] == ["2026-10-23"]
+
+
+def test_main_two_sessions_in_one_file_store_nothing(tmp_path: Path, engine: Engine) -> None:
+    with pytest.raises(ValueError, match="2 sessions"):
+        main(write_json(tmp_path / "p.json", row("AAA"), row("BBB", date="2026-10-24")), engine)
+    assert stored(engine) == []
 
 
 def test_main_bad_row_stores_nothing(tmp_path: Path, engine: Engine) -> None:

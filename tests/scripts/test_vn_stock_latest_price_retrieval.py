@@ -1,3 +1,4 @@
+import datetime as dt
 import json
 import subprocess
 import sys
@@ -20,13 +21,26 @@ class FakeSource(PriceSource):
         self.calls: list[str] = []
 
     def get_latest_price(self, symbol: str) -> Price:
+        raise AssertionError("the retrieval asks for the session's bar")
+
+    def get_history(self, symbol: str, start: dt.date, end: dt.date) -> list[Price]:
         self.calls.append(symbol)
         outcome = self.outcomes.pop(0) if self.outcomes else None
         if outcome:
             raise outcome
-        return Price.model_validate(
-            dict(symbol=symbol, source=self.name, date="2026-10-23", open=1, high=2, low=1, close=2, volume=10)
-        )
+        return [
+            Price.model_validate(
+                dict(symbol=symbol, source=self.name, date=start, open=1, high=2, low=1, close=2, volume=10)
+            )
+        ]
+
+
+SESSION = dt.date(2026, 10, 23)
+
+
+@pytest.fixture(autouse=True)
+def session_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SESSION", SESSION.isoformat())
 
 
 @pytest.fixture(autouse=True)
@@ -76,39 +90,39 @@ def test_read_symbols_rejects_bad_symbol(tmp_path: Path) -> None:
 
 def test_first_source_ok_no_sleep(retry_sleeps: list[float]) -> None:
     first, second = FakeSource("A"), FakeSource("B")
-    assert get_price("FPT", [first, second]).source == "A"
+    assert get_price("FPT", SESSION, [first, second]).source == "A"
     assert (len(first.calls), len(second.calls), retry_sleeps) == (1, 0, [])
 
 
 def test_retries_same_source_once(retry_sleeps: list[float]) -> None:
     first, second = FakeSource("A", OSError("boom")), FakeSource("B")
-    assert get_price("FPT", [first, second]).source == "A"
+    assert get_price("FPT", SESSION, [first, second]).source == "A"
     assert (len(first.calls), len(second.calls), retry_sleeps) == (2, 0, [1])
 
 
 def test_falls_back_after_two_failures() -> None:
     first, second = FakeSource("A", OSError("1"), OSError("2")), FakeSource("B")
-    assert get_price("FPT", [first, second]).source == "B"
+    assert get_price("FPT", SESSION, [first, second]).source == "B"
     assert (len(first.calls), len(second.calls)) == (2, 1)
 
 
 def test_not_found_is_not_retried(retry_sleeps: list[float]) -> None:
     first, second = FakeSource("A", PriceNotFoundError("nope")), FakeSource("B")
-    assert get_price("FPT", [first, second]).source == "B"
+    assert get_price("FPT", SESSION, [first, second]).source == "B"
     assert (len(first.calls), len(second.calls), retry_sleeps) == (1, 1, [])
 
 
 def test_all_sources_fail() -> None:
     sources = [FakeSource(name, OSError(f"{name}1"), OSError(f"{name}2")) for name in ("A", "B", "C")]
     with pytest.raises(RuntimeError) as error:
-        get_price("FPT", sources)
+        get_price("FPT", SESSION, sources)
     assert all(f"{name}: OSError: {name}2" in str(error.value) for name in ("A", "B", "C"))
     assert sum(len(source.calls) for source in sources) == 6
 
 
 def test_an_unexpected_error_in_a_source_falls_back_to_the_next() -> None:
     first, second = FakeSource("A", AttributeError("1"), AttributeError("2")), FakeSource("B")
-    assert get_price("FPT", [first, second]).source == "B"
+    assert get_price("FPT", SESSION, [first, second]).source == "B"
 
 
 def test_main_skips_failed_symbol(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,6 +184,24 @@ def test_main_no_data_removes_stale_output(tmp_path: Path) -> None:
     csv_path = write_csv(tmp_path / "s.csv", "AAA")
     assert main(csv_path, out, [FakeSource("A", *[OSError()] * 2)], sleep=lambda _: None) == NO_DATA
     assert not out.exists()
+
+
+def test_a_session_without_a_bar_is_not_found_and_not_retried(retry_sleeps: list[float]) -> None:
+    class Empty(FakeSource):
+        def get_history(self, symbol: str, start: dt.date, end: dt.date) -> list[Price]:
+            self.calls.append(symbol)
+            return []
+
+    first, second = Empty("A"), FakeSource("B")
+    assert get_price("FPT", SESSION, [first, second]).source == "B"
+    assert (len(first.calls), retry_sleeps) == (1, [])
+
+
+def test_main_fetches_the_session_of_the_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SESSION", "2026-11-26")
+    out = tmp_path / "out.json"
+    assert main(write_csv(tmp_path / "s.csv", "AAA"), out, [FakeSource("A")], sleep=lambda _: None) == 0
+    assert json.loads(out.read_text(encoding="utf-8"))[0]["date"] == "2026-11-26"
 
 
 def test_crash_is_not_no_data(tmp_path: Path) -> None:

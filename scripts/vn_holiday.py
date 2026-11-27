@@ -6,7 +6,7 @@ Holidays come from the `holidays` package: Tết, Giỗ Tổ (lunar), nghỉ bù
 """
 
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import holidays
 
@@ -25,6 +25,14 @@ def off_reason(day: date) -> str | None:
     if day.weekday() >= 5:
         return "weekend"
     return CLOSURES.get(day) or holidays.VN(years=day.year).get(day)
+
+
+def next_session(last: date) -> date:
+    """The first working day after `last`: weekends and Vietnamese public holidays are skipped."""
+    day = last + timedelta(days=1)
+    while off_reason(day):
+        day += timedelta(days=1)
+    return day
 
 
 if __name__ == "__main__":

@@ -72,6 +72,10 @@ def test_get_ex_rights(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "q=effectiveDate:2026-11-27~type:DIVIDEND,STOCKDIV,KINDDIV,ISSUE~locale:VN&" in urls[0]
 
 
-def test_vndirect_has_no_history() -> None:
-    with pytest.raises(NotImplementedError):
-        VNDirect().get_history("FPT", date(2019, 1, 1), date(2019, 12, 31))
+def test_get_history_is_ascending(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls: list[str] = []
+    rows = [{**PAYLOAD["data"][0], "date": day} for day in ("2026-10-23", "2026-10-22")]  # VNDirect may answer desc
+    monkeypatch.setattr(TARGET, lambda url: urls.append(url) or {"data": rows})
+    bars = VNDirect().get_history("fpt", date(2026, 10, 22), date(2026, 10, 23))
+    assert [bar.date for bar in bars] == [date(2026, 10, 22), date(2026, 10, 23)] and bars[0].close == 57.0
+    assert "q=code:FPT~date:gte:2026-10-22~date:lte:2026-10-23&" in urls[0]
