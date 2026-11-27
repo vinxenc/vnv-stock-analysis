@@ -106,3 +106,8 @@ def test_two_bars_of_one_date_keep_the_later_one(monkeypatch: pytest.MonkeyPatch
     assert [(bar.date, bar.volume) for bar in DNSE().get_history("FPT", date(2022, 12, 1), date(2022, 12, 31))] == [
         (date(2022, 12, 27), 805200)
     ]
+
+
+def test_bars_are_returned_ascending(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(TARGET, lambda url: {key: values[::-1] for key, values in PAYLOAD.items()})
+    assert [bar.date for bar in DNSE().get_history("FPT", *OCTOBER)] == [date(2026, 10, 22), date(2026, 10, 23)]

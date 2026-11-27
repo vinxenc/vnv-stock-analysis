@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# One run at a time: an overlapping run could store bars it fetched before another run re-stored an ex-rights history
+concurrency:
+  group: vn-stock-prices-sync
+  cancel-in-progress: false
+
 jobs:
   start-analyze:
     runs-on: ubuntu-latest

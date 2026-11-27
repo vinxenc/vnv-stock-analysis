@@ -243,11 +243,11 @@ def test_a_working_day_without_any_bar_is_passed_over(tmp_path: Path) -> None:
     assert main(write_csv(tmp_path / "s.csv", "AAA"), out, [source], sleep=lambda _: None, log=log,
                 sessions=(dt.date(2026, 11, 30), dt.date(2026, 12, 2))) == 0  # fmt: skip
     assert [row["date"] for row in json.loads(out.read_text(encoding="utf-8"))] == ["2026-11-30", "2026-12-02"]
-    assert any("no symbol has a bar on 2026-12-01" in message for _, message in log.records)
+    assert any("only 0 of 1 symbols have a bar on 2026-12-01 (minimum 90%): dropped" in m for _, m in log.records)
 
 
 def test_a_session_with_too_few_bars_before_a_full_one_is_dropped(tmp_path: Path) -> None:
-    """A retry asks the same span: waiting for it would block the sync for good."""
+    """No source has the day: waiting for it would block the sync for good."""
     out, log = tmp_path / "out.json", FakeLogger()
     source = Range("A", sparse=(dt.date(2026, 12, 1),))  # 1 of 3 symbols on 12-01
     assert main(write_csv(tmp_path / "s.csv", "AAA", "BBB", "CCC"), out, [source], sleep=lambda _: None, log=log,
@@ -263,6 +263,30 @@ def test_a_newest_session_with_too_few_bars_stays_due(tmp_path: Path) -> None:
                 sessions=(dt.date(2026, 11, 30), dt.date(2026, 12, 2))) == 0  # fmt: skip
     assert {row["date"] for row in json.loads(out.read_text(encoding="utf-8"))} == {"2026-11-30", "2026-12-01"}
     assert any("2026-12-02 (minimum 90%): left out, it stays due" in message for _, message in log.records)
+
+
+def test_a_hole_of_the_first_source_is_filled_from_the_next_one(tmp_path: Path) -> None:
+    """The span request takes A's answer as it is; the day A lacks is asked again, alone, and B has it."""
+    out = tmp_path / "out.json"
+    first, second = Range("A", missing=(dt.date(2026, 12, 1),)), Range("B")
+    assert main(write_csv(tmp_path / "s.csv", "AAA", "BBB"), out, [first, second], sleep=lambda _: None,
+                sessions=(dt.date(2026, 11, 30), dt.date(2026, 12, 2))) == 0  # fmt: skip
+    rows = json.loads(out.read_text(encoding="utf-8"))
+    assert sorted((row["date"], row["source"]) for row in rows if row["date"] == "2026-12-01") == [
+        ("2026-12-01", "B"),
+        ("2026-12-01", "B"),
+    ]
+    assert len(rows) == 6 and second.calls == ["AAA", "BBB"]
+
+
+def test_asking_again_stops_once_the_day_cannot_pass(tmp_path: Path) -> None:
+    """A closure no calendar knows: 20 symbols, the day fails once 3 of them (over 10%) come back empty."""
+    out, codes = tmp_path / "out.json", [f"S{i:02d}" for i in range(20)]
+    first, second = Range("A", missing=(dt.date(2026, 12, 1),)), Range("B", missing=(dt.date(2026, 12, 1),))
+    assert main(write_csv(tmp_path / "s.csv", *codes), out, [first, second], sleep=lambda _: None,
+                sessions=(dt.date(2026, 11, 30), dt.date(2026, 12, 2))) == 0  # fmt: skip
+    assert {row["date"] for row in json.loads(out.read_text(encoding="utf-8"))} == {"2026-11-30", "2026-12-02"}
+    assert len(first.calls) == 20 + 3 and len(second.calls) == 3
 
 
 def test_crash_is_not_no_data(tmp_path: Path) -> None:

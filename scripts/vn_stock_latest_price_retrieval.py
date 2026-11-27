@@ -4,10 +4,12 @@ today) of every symbol in a CSV, one request per symbol, and write them as one J
 Usage: uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]
 Defaults: data/hose_symbols.csv  out/vn_stock_latest_prices.json
 Sources per symbol: DNSE -> VNDirect -> VPS, 1 retry each (tenacity). A symbol that fails everywhere is skipped.
-A session is written when at least MIN_COVERAGE of the symbols have a bar on it. One below it after the newest such
-session is left out and stays due (a partial outage, or bars not published yet: they never reach the database); one
-below it before that session is dropped, since a retry asks the same span and would not fill it (a market closure
-`scripts/vn_holiday.py` does not know, with a few stray bars). A working day without any bar is logged as a closure.
+A session is written when at least MIN_COVERAGE of the symbols have a bar on it. A span request stops at the first
+source with any bar, so a working day under it before the newest such session (a hole in that source) is asked again,
+one request per missing symbol for that day alone, which falls through to the next sources; it stops once too many
+come back empty for the day to pass. A day still under it is dropped and logged: no source has it (a market closure
+`scripts/vn_holiday.py` does not know). A day under it after the newest session that passes is left out and stays due
+(a partial outage, or bars not published yet: they never reach the database).
 Exit 0 = prices written, 4 = no session with enough bars (no file written), anything else = crash.
 """
 
@@ -62,18 +64,50 @@ def get_prices(symbol: str, first: dt.date, last: dt.date, sources: Sequence[Pri
     raise RuntimeError("all sources failed: " + "; ".join(errors))
 
 
+def refill(
+    prices: list[Price],
+    symbols: list[str],
+    first: dt.date,
+    sources: Sequence[PriceSource],
+    pause: Callable[[], None],
+    log: Logger,
+) -> list[Price]:
+    """`prices` plus the bars the other sources have on the working days under MIN_COVERAGE before the newest day that
+    passes: one request per missing symbol and day, until too many came back empty for the day to pass."""
+    counts = Counter(price.date for price in prices)
+    passing = [day for day, count in counts.items() if count >= MIN_COVERAGE * len(symbols)]
+    if not passing:
+        return prices
+    for day in working_days(first, max(passing)):
+        if counts[day] >= MIN_COVERAGE * len(symbols):
+            continue
+        have = {price.symbol for price in prices if price.date == day}
+        missing = 0
+        for symbol in symbols:
+            if len(symbols) - missing < MIN_COVERAGE * len(symbols):  # the day can no longer pass
+                break
+            if symbol in have:
+                continue
+            pause()
+            try:
+                prices = prices + get_prices(symbol, day, day, sources)
+            except RuntimeError:
+                missing += 1
+        found = sum(price.date == day for price in prices)
+        log.info("%s: %d of %d symbols have a bar after asking again", day, found, len(symbols))
+    return prices
+
+
 def covered(prices: list[Price], first: dt.date, last: dt.date, symbols: int, log: Logger) -> list[Price]:
     """The bars of the sessions at least MIN_COVERAGE of the symbols have a bar on (see the module docstring)."""
     counts = Counter(price.date for price in prices)
-    closure = "a market closure missing from CLOSURES (scripts/vn_holiday.py)?"
-    for day in working_days(first, last):
-        if day not in counts:
-            log.warning("no symbol has a bar on %s: %s", day, closure)
     kept = {day for day, count in counts.items() if count >= MIN_COVERAGE * symbols}
-    for day in sorted(set(counts) - kept):
-        fate = f"dropped, {closure}" if kept and day < max(kept) else "left out, it stays due"
+    for day in working_days(first, last):
+        if day in kept:
+            continue
+        fate = "dropped: no source has it, a market closure missing from CLOSURES (scripts/vn_holiday.py)?"
         log.warning("only %d of %d symbols have a bar on %s (minimum %.0f%%): %s", counts[day], symbols, day,
-                    MIN_COVERAGE * 100, fate)  # fmt: skip
+                    MIN_COVERAGE * 100, fate if kept and day < max(kept) else "left out, it stays due")  # fmt: skip
     return [price for price in prices if price.date in kept]
 
 
@@ -111,7 +145,7 @@ def main(
     if not prices:
         log.error("no price fetched, nothing written")
         return NO_DATA
-    prices = covered(prices, first, last, len(symbols), log)
+    prices = covered(refill(prices, symbols, first, sources, lambda: sleep(delay), log), first, last, len(symbols), log)
     if not prices:
         log.error("no session from %s to %s has enough bars, nothing written", first, last)
         return NO_DATA

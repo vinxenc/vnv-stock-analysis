@@ -52,7 +52,7 @@ def bars(source: str, symbol: str, data: dict[str, Any]) -> list[Price]:
         except ValidationError:
             continue
         valid[day] = bar  # DNSE has two bars for some dates (2022-12-27: a stray 07:00 one before the 09:00 session)
-    return list(valid.values())
+    return sorted(valid.values(), key=lambda bar: bar.date)
 
 
 def validate_symbol(symbol: str) -> str:
