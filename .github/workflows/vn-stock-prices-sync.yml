@@ -66,9 +66,35 @@ jobs:
           failure-message: Pipeline failed, can not check the holiday
           success-level: ${{ steps.check.outputs.holiday == 'true' && 'warning' || 'info' }}
 
+  # Before the retrieval: the symbols whose ex-rights date (GDKHQ) is today get their whole history (from 2019)
+  # re-stored as the source adjusts it. A failure stops the sync: the prices of the day wait for a rerun.
+  dividend_history:
+    name: vn stock dividend history
+    needs: is_holiday
+    if: needs.is_holiday.outputs.holiday == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production  # DATABASE_URL is an environment secret, limited to master
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-env
+      - name: Re-store the history of today's ex-rights symbols
+        run: uv run --no-sync python -m scripts.vn_stock_dividend_history
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - if: always()
+        uses: ./.github/actions/pipeline-state
+        with:
+          pipeline: dividend_history
+          job-status: ${{ job.status }}
+          success-message: Re-stored the history of today's ex-rights symbols
+          failure-message: Pipeline failed, can not re-store the history of today's ex-rights symbols
+
   retrieve_prices:
     name: vn stock latest price retrieval
-    needs: is_holiday
+    needs: [is_holiday, dividend_history]
     if: needs.is_holiday.outputs.holiday == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 180
@@ -122,7 +148,7 @@ jobs:
           failure-message: Pipeline failed, can not store the prices in the database
 
   notification:
-    needs: [start-analyze, install, is_holiday, retrieve_prices, vn_stock_daily_price_store]
+    needs: [start-analyze, install, is_holiday, dividend_history, retrieve_prices, vn_stock_daily_price_store]
     if: always()  # also after a failed or skipped job: it only reads the state files they wrote
     runs-on: ubuntu-latest
     steps:

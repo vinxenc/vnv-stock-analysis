@@ -64,7 +64,14 @@ def test_invalid_symbol_rejected_before_any_request(monkeypatch: pytest.MonkeyPa
         VNDirect().get_latest_price("FPT~floor:HOSE")
 
 
-def test_get_recent_prices_is_the_latest_bar_alone(monkeypatch: pytest.MonkeyPatch) -> None:
-    """VNDirect is asked for one row: the default of `PriceSource` gives no older bar to compare."""
-    monkeypatch.setattr(TARGET, lambda url: PAYLOAD)
-    assert VNDirect().get_recent_prices("FPT") == [VNDirect().get_latest_price("FPT")]
+def test_get_ex_rights(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls: list[str] = []
+    rows = [{"code": "FPT", "type": "DIVIDEND"}, {"code": "VPX", "type": "KINDDIV"}, {"code": "FPT", "type": "ISSUE"}]
+    monkeypatch.setattr(TARGET, lambda url: urls.append(url) or {"data": rows})
+    assert VNDirect().get_ex_rights(date(2026, 11, 27)) == {"FPT", "VPX"}
+    assert "q=effectiveDate:2026-11-27~type:DIVIDEND,STOCKDIV,KINDDIV,ISSUE~locale:VN&" in urls[0]
+
+
+def test_vndirect_has_no_history() -> None:
+    with pytest.raises(NotImplementedError):
+        VNDirect().get_history("FPT", date(2019, 1, 1), date(2019, 12, 31))

@@ -1,22 +1,25 @@
 import time
+from datetime import date
 
-from .base import Price, PriceNotFoundError, PriceSource, bars, http_get_json, validate_symbol
+from .base import Price, PriceNotFoundError, PriceSource, bars, http_get_json, span, validate_symbol
 
 
 class VPS(PriceSource):
     name = "VPS"
 
     def get_latest_price(self, symbol: str) -> Price:
-        return self.get_recent_prices(symbol)[-1]
-
-    def get_recent_prices(self, symbol: str) -> list[Price]:
-        """The sessions of the last 10 calendar days."""
-        symbol = validate_symbol(symbol)
         now = int(time.time())
-        data = http_get_json(
-            "https://histdatafeed.vps.com.vn/tradingview/history"
-            f"?symbol={symbol}&resolution=1D&from={now - 86400 * 10}&to={now}"
-        )
-        if not data.get("t"):
+        recent = self._bars(symbol, now - 86400 * 10, now)
+        if not recent:
             raise PriceNotFoundError(f"no data for {symbol} (unknown ticker?)")
+        return recent[-1]
+
+    def get_history(self, symbol: str, start: date, end: date) -> list[Price]:
+        return self._bars(symbol, *span(start, end))
+
+    def _bars(self, symbol: str, start: int, end: int) -> list[Price]:
+        symbol = validate_symbol(symbol)
+        data = http_get_json(
+            f"https://histdatafeed.vps.com.vn/tradingview/history?symbol={symbol}&resolution=1D&from={start}&to={end}"
+        )
         return bars(self.name, symbol, data)

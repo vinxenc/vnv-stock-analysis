@@ -1,6 +1,6 @@
 import re
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Any
 
 import niquests
@@ -28,21 +28,30 @@ class PriceSource(ABC):
         (network, HTTP 5xx, malformed payload) propagate as their own exceptions.
         """
 
-    def get_recent_prices(self, symbol: str) -> list[Price]:
-        """The bars the source returns along with the latest one, ascending, the latest last: the price store compares
-        the older ones with the stored bars to see a dividend adjustment. Default: the latest bar alone."""
-        return [self.get_latest_price(symbol)]
+    def get_history(self, symbol: str, start: date, end: date) -> list[Price]:
+        """Every daily bar from `start` to `end` (both included), ascending, adjusted as of today like the latest one.
+        Empty when the symbol had no session then (not listed yet). Only the chart sources (DNSE, VPS) have it."""
+        raise NotImplementedError(f"{self.name} has no history")
+
+
+def span(start: date, end: date) -> tuple[int, int]:
+    """`start` 00:00 to `end` 23:59:59 in Vietnam time, as the unix seconds of a chart request."""
+    return int(datetime.combine(start, time.min, VN_TZ).timestamp()), int(
+        datetime.combine(end, time.max, VN_TZ).timestamp()
+    )
 
 
 def bars(source: str, symbol: str, data: dict[str, Any]) -> list[Price]:
-    """The `t/o/h/l/c/v` arrays of a TradingView-style chart payload (DNSE, VPS) as prices, ascending. An invalid older
-    bar (a price of 0, say) is dropped: it is only evidence for the store. The latest one must be valid."""
+    """The `t/o/h/l/c/v` arrays of a TradingView-style chart payload (DNSE, VPS) as prices, ascending; none when the
+    payload has no bar. An invalid bar (a price of 0, say) is dropped, except the latest one; one bar per date."""
+    if not data.get("t"):
+        return []
     *older, latest = zip(data["t"], data["o"], data["h"], data["l"], data["c"], data["v"], strict=True)
 
     def price(t: int, o: float, h: float, low: float, c: float, v: int) -> Price:
-        date = datetime.fromtimestamp(t, VN_TZ).date()
+        day = datetime.fromtimestamp(t, VN_TZ).date()
         return Price.model_validate(
-            dict(symbol=symbol, source=source, date=date, open=o, high=h, low=low, close=c, volume=v)
+            dict(symbol=symbol, source=source, date=day, open=o, high=h, low=low, close=c, volume=v)
         )
 
     valid = []
@@ -51,7 +60,8 @@ def bars(source: str, symbol: str, data: dict[str, Any]) -> list[Price]:
             valid.append(price(*row))
         except ValidationError:
             continue
-    return [*valid, price(*latest)]
+    # DNSE has two bars for some dates (2022-12-27: a stray 07:00 one before the 09:00 session): the later one wins
+    return list({bar.date: bar for bar in [*valid, price(*latest)]}.values())
 
 
 def validate_symbol(symbol: str) -> str:

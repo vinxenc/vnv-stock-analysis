@@ -2,16 +2,15 @@ import json
 import os
 import subprocess
 import sys
-import threading
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from libs.db.models import Price, PriceAdjustment
-from scripts.vn_stock_daily_price_store import MAX_ADJUSTED, NO_DATA, main, read_prices
+from libs.db.models import Price
+from scripts.vn_stock_daily_price_store import NO_DATA, main, read_prices
 
 
 def row(symbol: str, close: float = 2.0, date: str = "2026-10-23", source: str = "A") -> dict[str, object]:
@@ -53,17 +52,12 @@ def test_main_inserts_rows(tmp_path: Path, engine: Engine) -> None:
 
 def test_main_twice_overwrites_same_symbol_and_date(tmp_path: Path, engine: Engine) -> None:
     main(write_json(tmp_path / "1.json", row("AAA", close=2), row("BBB")), engine)
-    main(write_json(tmp_path / "2.json", row("AAA", close=9, source="B")), engine)
+    main(write_json(tmp_path / "2.json", row("AAA", close=9, source="B"), row("AAA", date="2026-10-24")), engine)
     assert [(price.symbol, str(price.date), price.close, price.source) for price in stored(engine)] == [
         ("AAA", "2026-10-23", 9.0, "B"),
+        ("AAA", "2026-10-24", 2.0, "A"),
         ("BBB", "2026-10-23", 2.0, "A"),
     ]
-
-
-def test_only_the_newest_bar_of_a_symbol_is_stored(tmp_path: Path, engine: Engine) -> None:
-    """The older bars of the file are evidence for an adjustment, never stored as such."""
-    main(write_json(tmp_path / "p.json", row("AAA", date="2026-10-22"), row("AAA", date="2026-10-23")), engine)
-    assert [str(price.date) for price in stored(engine)] == ["2026-10-23"]
 
 
 def test_main_bad_row_stores_nothing(tmp_path: Path, engine: Engine) -> None:
@@ -93,129 +87,3 @@ def test_crash_is_not_no_data(tmp_path: Path) -> None:
     result = subprocess.run(cmd, capture_output=True, cwd=Path(__file__).parents[2])
     assert result.returncode == 1
     assert b"FileNotFoundError" in result.stderr
-
-
-# Dividend adjustments (libs/prices/adjustment.py)
-DAYS = ["2026-11-19", "2026-11-20", "2026-11-21", "2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27"]
-
-
-def ohlc(symbol: str, date: str, close: float, factor: float = 1.0, volume: int = 1000) -> dict[str, object]:
-    prices = {name: round(close * scale * factor, 2) for name, scale in (("open", 1.01), ("high", 1.02), ("low", 0.98))}
-    return dict(symbol=symbol, source="DNSE", date=date, close=round(close * factor, 2), volume=volume, **prices)
-
-
-def adjustments(engine: Engine) -> list[tuple]:
-    with Session(engine) as session:
-        return [
-            (a.symbol, str(a.through), round(a.factor, 4), a.source, a.bars)
-            for a in session.exec(select(PriceAdjustment).order_by(PriceAdjustment.id))
-        ]
-
-
-def test_the_real_bvh_case_is_repaired(tmp_path: Path, engine: Engine) -> None:
-    """2026-11-25 was re-stored adjusted (56.9 -> 56.09) after midnight, the older bars are raw; the next sync's window
-    shows them all adjusted by 0.9858, so they are multiplied and 2026-11-25 is left as it is."""
-    raw = [58.0, 57.6, 57.9, 57.2]
-    for day, close in zip(DAYS, raw, strict=False):
-        main(write_json(tmp_path / f"{day}.json", ohlc("BVH", day, close)), engine)
-    bvh_25 = dict(
-        symbol="BVH", source="DNSE", date=DAYS[4], open=57.18, high=57.67, low=56.09, close=56.09, volume=302300
-    )
-    main(write_json(tmp_path / "25.json", bvh_25), engine)
-    window = [ohlc("BVH", day, close, factor=0.98576) for day, close in zip(DAYS, raw, strict=False)]
-    window += [bvh_25, ohlc("BVH", DAYS[5], 54.0)]
-    assert main(write_json(tmp_path / "w.json", *window), engine) == 0
-    assert adjustments(engine) == [("BVH", DAYS[3], 0.9858, "DNSE", 4)]
-    assert [price.close for price in stored(engine)] == [row["close"] for row in window]
-    assert main(write_json(tmp_path / "w.json", *window), engine) == 0  # a rerun changes nothing, logs nothing
-    assert len(adjustments(engine)) == 1
-
-
-def test_older_bars_outside_the_window_are_multiplied(tmp_path: Path, engine: Engine) -> None:
-    for day in DAYS[:5]:
-        main(write_json(tmp_path / f"{day}.json", ohlc("FPT", day, 44.5)), engine)
-    window = [ohlc("FPT", day, 44.5, factor=0.9775) for day in DAYS[3:5]] + [ohlc("FPT", DAYS[5], 43.0)]
-    main(write_json(tmp_path / "w.json", *window), engine)
-    closes = [price.close for price in stored(engine)]
-    assert closes[:3] == [pytest.approx(44.5 * 0.9775, abs=0.005)] * 3  # not returned by the source: times the factor
-    assert closes[3:] == [43.5, 43.5, 43.0]  # the source's own bars, then the new one
-    assert adjustments(engine)[0][1:] == (DAYS[4], 0.9775, "DNSE", 5)
-
-
-def test_a_cheap_symbol_does_not_drift(tmp_path: Path, engine: Engine) -> None:
-    """At 1.5 a 0.01 step is 0.7%: the window bars take the source's values, so the next run sees no move."""
-    for day in DAYS[:4]:
-        main(write_json(tmp_path / f"{day}.json", ohlc("PEN", day, 1.52)), engine)
-    first = [ohlc("PEN", day, 1.52, factor=0.9) for day in DAYS[:4]] + [ohlc("PEN", DAYS[4], 1.4)]
-    main(write_json(tmp_path / "1.json", *first), engine)
-    second = first[1:] + [ohlc("PEN", DAYS[5], 1.41)]
-    main(write_json(tmp_path / "2.json", *second), engine)
-    assert len(adjustments(engine)) == 1
-    assert [price.close for price in stored(engine)] == [1.37, 1.37, 1.37, 1.37, 1.4, 1.41]
-
-
-def test_bars_that_moved_otherwise_are_left_alone(tmp_path: Path, engine: Engine) -> None:
-    for day in DAYS[:3]:
-        main(write_json(tmp_path / f"{day}.json", ohlc("MSH", day, 34.6)), engine)
-    window = [ohlc("MSH", DAYS[0], 34.6), ohlc("MSH", DAYS[1], 34.6, factor=0.88), ohlc("MSH", DAYS[2], 34.6)]
-    log = FakeLog()
-    assert main(write_json(tmp_path / "w.json", *window, ohlc("MSH", DAYS[3], 30.0)), engine, log) == 0
-    assert adjustments(engine) == []
-    assert [price.close for price in stored(engine)] == [34.6, 34.6, 34.6, 30.0]
-    assert any("not adjusted: MSH" in line for line in log.lines)
-
-
-def test_an_unexplained_move_keeps_the_stored_newest_bar(tmp_path: Path, engine: Engine) -> None:
-    """If DNSE re-quotes the latest bar adjusted without the older ones, the raw bar must not be overwritten."""
-    for day in DAYS[:3]:
-        main(write_json(tmp_path / f"{day}.json", ohlc("VPX", day, 21.15)), engine)
-    window = [ohlc("VPX", day, 21.15, factor=0.69) for day in DAYS[:3]]
-    window[1] = ohlc("VPX", DAYS[1], 21.15, factor=0.8)  # not one factor: the warning path
-    assert main(write_json(tmp_path / "w.json", *window), engine, FakeLog()) == 0
-    assert [price.close for price in stored(engine)] == [21.15, 21.15, 21.15]
-
-
-def test_an_unexplained_move_still_upserts_a_correction_of_the_newest_bar(tmp_path: Path, engine: Engine) -> None:
-    """A rerun after a bar fetched before the close: the older bars are inconsistent, the newest is a correction."""
-    for day in DAYS[:2]:
-        main(write_json(tmp_path / f"{day}.json", ohlc("HPG", day, 27.0)), engine)
-    main(write_json(tmp_path / "partial.json", ohlc("HPG", DAYS[2], 27.3, volume=500)), engine)
-    window = [ohlc("HPG", DAYS[0], 27.0), ohlc("HPG", DAYS[1], 27.0, factor=0.9), ohlc("HPG", DAYS[2], 27.5)]
-    log = FakeLog()
-    assert main(write_json(tmp_path / "w.json", *window), engine, log) == 0
-    assert [(price.close, price.volume) for price in stored(engine)] == [(27.0, 1000), (27.0, 1000), (27.5, 1000)]
-    assert any("not adjusted: HPG" in line for line in log.lines)
-
-
-def test_too_many_adjustments_store_nothing(tmp_path: Path, engine: Engine) -> None:
-    symbols = [f"S{n:02}" for n in range(MAX_ADJUSTED + 1)]
-    for day in DAYS[:2]:
-        main(write_json(tmp_path / f"{day}.json", *[ohlc(symbol, day, 10.0) for symbol in symbols]), engine)
-    window = [ohlc(s, day, 10.0, factor=0.9) for s in symbols for day in DAYS[:2]]
-    window += [ohlc(s, DAYS[2], 9.0) for s in symbols]
-    with pytest.raises(RuntimeError, match="stored nothing"):
-        main(write_json(tmp_path / "w.json", *window), engine)
-    assert {price.close for price in stored(engine)} == {10.0} and adjustments(engine) == []
-
-
-def test_one_store_at_a_time(tmp_path: Path, engine: Engine) -> None:
-    """A second run waits for the first to commit, so it sees the adjusted bars and never applies a factor twice."""
-    path = write_json(tmp_path / "p.json", row("AAA"))
-    with engine.begin() as connection:
-        connection.execute(text("SELECT pg_advisory_xact_lock(hashtext('vn_stock_daily_price_store'))"))
-        run = threading.Thread(target=main, args=(path, engine))
-        run.start()
-        run.join(timeout=0.5)
-        assert run.is_alive()  # blocked on the lock
-    run.join(timeout=5)
-    assert [price.symbol for price in stored(engine)] == ["AAA"]
-
-
-class FakeLog:
-    def __init__(self) -> None:
-        self.lines: list[str] = []
-
-    def debug(self, msg: str, *args: object) -> None:
-        self.lines.append(msg % args)
-
-    info = warning = error = debug

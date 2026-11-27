@@ -70,7 +70,9 @@ def test_invalid_symbol_rejected_before_any_request(monkeypatch: pytest.MonkeyPa
         VPS().get_latest_price("FPT&x=1")
 
 
-def test_get_recent_prices_returns_every_bar(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(TARGET, lambda url: PAYLOAD)
-    bars = VPS().get_recent_prices("FPT")
-    assert len(bars) == len(PAYLOAD["t"]) and bars[-1] == VPS().get_latest_price("FPT")
+def test_get_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls: list[str] = []
+    monkeypatch.setattr(TARGET, lambda url: urls.append(url) or PAYLOAD)
+    bars = VPS().get_history("FPT", date(2019, 1, 1), date(2019, 12, 31))
+    assert len(bars) == 2 and bars[-1] == VPS().get_latest_price("FPT")
+    assert f"from={ts(2018, 12, 31, 17)}&to={ts(2019, 12, 31, 16, 59, 59)}" in urls[0]

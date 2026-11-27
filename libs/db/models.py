@@ -95,22 +95,3 @@ class DecisionRecord(SQLModel, table=True):
     )
     return_5: float | None = None  # close(t+5) / close(t) - 1, null until the outcome job fills it
     hit: bool | None = None  # return_5 >= 3%
-
-
-class PriceAdjustment(SQLModel, table=True):
-    """One dividend / split adjustment the price store applied to `vn_stock_prices`: every price of `symbol` up to
-    `through` was multiplied by `factor` (volume unchanged, as the sources do). Written in the same transaction as the
-    change, so the log and the prices never disagree. `factor` has a CHECK (> 0) in the migration and here."""
-
-    __tablename__ = "vn_stock_price_adjustments"
-    __table_args__ = (CheckConstraint("factor > 0", name="ck_vn_stock_price_adjustments_factor"),)
-
-    id: int | None = Field(default=None, primary_key=True)  # two rows may share symbol and `through`
-    symbol: str
-    through: dt.date  # the last date adjusted; the ex-date is a later session
-    factor: float
-    source: str  # whose bars showed the adjustment
-    bars: int  # bars changed
-    created_at: dt.datetime | None = Field(
-        default=None, nullable=False, sa_type=DateTime(timezone=True), sa_column_kwargs={"server_default": func.now()}
-    )

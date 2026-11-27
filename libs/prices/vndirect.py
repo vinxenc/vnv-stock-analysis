@@ -1,4 +1,8 @@
+from datetime import date
+
 from .base import Price, PriceNotFoundError, PriceSource, http_get_json, validate_symbol
+
+EX_RIGHTS = ("DIVIDEND", "STOCKDIV", "KINDDIV", "ISSUE")  # cash, stock dividend, bonus shares, rights issue
 
 
 class VNDirect(PriceSource):
@@ -25,3 +29,12 @@ class VNDirect(PriceSource):
                 volume=row["nmVolume"],
             )
         )
+
+    def get_ex_rights(self, day: date) -> set[str]:
+        """The symbols, of every exchange, whose ex-rights date (GDKHQ) is `day` for an event that moves the price:
+        a cash or stock dividend, bonus shares, a rights issue. VNDirect calls the ex-rights date `effectiveDate`."""
+        rows = http_get_json(
+            f"https://api-finfo.vndirect.com.vn/v4/events?q=effectiveDate:{day.isoformat()}~type:{','.join(EX_RIGHTS)}"
+            "~locale:VN&size=1000"
+        )["data"]
+        return {row["code"] for row in rows}
