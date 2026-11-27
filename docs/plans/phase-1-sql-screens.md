@@ -274,9 +274,16 @@ From a `/ponytail-review` of these plans on 2026-10-28. Outcome (2026-11-10): #2
 
 All 3 sources return **adjusted** prices (`vndirect.py` reads the `ad*` fields to match DNSE and VPS). Adjusted past prices change whenever a new corporate action happens, while a row already stored in `prices` keeps the value it had when stored. On an ex-rights day, today's `close` compared with the stored previous `close` gives a fake drop, and it pollutes every moving average, high and return whose window contains that day. Phase 1 does not refresh stored history, so `vn_stock_analyze` must detect it (step 4); the real fix is to re-fetch the history of the shortlist periodically, which belongs to the backfill task.
 
+**Fixed going forward (2026-11-27, option B, migration `0010`).** The sync now writes, with each latest bar, the older bars the source returned with it (DNSE and VPS: the sessions of the last 10 days). `vn_stock_daily_price_store` compares them with the stored bars of the same source: when they are the stored ones times one factor with the same volume, every stored bar of the symbol up to the last changed one is multiplied by it (volume unchanged), the source's own bars replace the ones it returned, and the adjustment is logged in `vn_stock_price_adjustments`, in one transaction with the upsert of the latest bar (`libs/prices/adjustment.py`). Any other move is a warning and touches nothing; more than 20 symbols in one run stores nothing. So the stored history is adjusted as of the newest fetch, like the source's, and the log keeps each factor, from which the price as first stored can be recomputed. It also repairs the bar DNSE returns adjusted after midnight on the eve of an ex-date (the scheduled sync used to overwrite the raw bar with it: BVH 2026-11-25, FPT 2026-11-26, seen by the Phase 3 look-ahead check).
+
+Not covered yet:
+- An ex-date older than the 10-day window when the sync first sees it: VPI (2026-11-09) and every event before the first deployed run. A one-time repair needs a longer fetch per symbol; not built.
+- The five bars re-stored adjusted on 2026-11-26 and 11-27 (BVH, MSH, FPT, PDN, VPX) are repaired by the first run after the deploy, as long as their raw neighbours are still inside the window (until about 2026-12-04).
+- Outcomes already filled across an adjusted date (`vn_stock_decisions.hit`) are not recomputed; the stored rankings keep the values they were scored with.
+
 ### Known limits
 
-- A cash dividend smaller than the price band cannot be told apart from a real drop without an events calendar; it stays in the data.
+- A cash dividend smaller than the price band cannot be told apart from a real drop without an events calendar; it stays in the data. Since `0010` the sync sees it from the source's re-adjusted bars instead (above), down to one 0.01 step of the price.
 - To verify: whether a stock's first session after a long trading suspension also gets a wider band, like a new listing. If so, the corporate-action check needs the same exception.
 
 ### Facts for the backfill task (not Phase 1)

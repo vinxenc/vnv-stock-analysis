@@ -62,3 +62,9 @@ def test_invalid_symbol_rejected_before_any_request(monkeypatch: pytest.MonkeyPa
 
     with pytest.raises(PriceNotFoundError, match="invalid symbol"):
         VNDirect().get_latest_price("FPT~floor:HOSE")
+
+
+def test_get_recent_prices_is_the_latest_bar_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """VNDirect is asked for one row: the default of `PriceSource` gives no older bar to compare."""
+    monkeypatch.setattr(TARGET, lambda url: PAYLOAD)
+    assert VNDirect().get_recent_prices("FPT") == [VNDirect().get_latest_price("FPT")]

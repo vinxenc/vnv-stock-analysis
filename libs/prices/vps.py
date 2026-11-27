@@ -1,15 +1,16 @@
 import time
-from datetime import datetime
 
-from libs.constants import VN_TZ
-
-from .base import Price, PriceNotFoundError, PriceSource, http_get_json, validate_symbol
+from .base import Price, PriceNotFoundError, PriceSource, bars, http_get_json, validate_symbol
 
 
 class VPS(PriceSource):
     name = "VPS"
 
     def get_latest_price(self, symbol: str) -> Price:
+        return self.get_recent_prices(symbol)[-1]
+
+    def get_recent_prices(self, symbol: str) -> list[Price]:
+        """The sessions of the last 10 calendar days."""
         symbol = validate_symbol(symbol)
         now = int(time.time())
         data = http_get_json(
@@ -18,15 +19,4 @@ class VPS(PriceSource):
         )
         if not data.get("t"):
             raise PriceNotFoundError(f"no data for {symbol} (unknown ticker?)")
-        return Price.model_validate(
-            dict(
-                symbol=symbol,
-                source=self.name,
-                date=datetime.fromtimestamp(data["t"][-1], VN_TZ).date(),
-                open=data["o"][-1],
-                high=data["h"][-1],
-                low=data["l"][-1],
-                close=data["c"][-1],
-                volume=data["v"][-1],
-            )
-        )
+        return bars(self.name, symbol, data)

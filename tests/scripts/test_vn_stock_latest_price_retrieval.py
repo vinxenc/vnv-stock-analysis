@@ -76,25 +76,25 @@ def test_read_symbols_rejects_bad_symbol(tmp_path: Path) -> None:
 
 def test_first_source_ok_no_sleep(retry_sleeps: list[float]) -> None:
     first, second = FakeSource("A"), FakeSource("B")
-    assert get_price("FPT", [first, second]).source == "A"
+    assert get_price("FPT", [first, second])[-1].source == "A"
     assert (len(first.calls), len(second.calls), retry_sleeps) == (1, 0, [])
 
 
 def test_retries_same_source_once(retry_sleeps: list[float]) -> None:
     first, second = FakeSource("A", OSError("boom")), FakeSource("B")
-    assert get_price("FPT", [first, second]).source == "A"
+    assert get_price("FPT", [first, second])[-1].source == "A"
     assert (len(first.calls), len(second.calls), retry_sleeps) == (2, 0, [1])
 
 
 def test_falls_back_after_two_failures() -> None:
     first, second = FakeSource("A", OSError("1"), OSError("2")), FakeSource("B")
-    assert get_price("FPT", [first, second]).source == "B"
+    assert get_price("FPT", [first, second])[-1].source == "B"
     assert (len(first.calls), len(second.calls)) == (2, 1)
 
 
 def test_not_found_is_not_retried(retry_sleeps: list[float]) -> None:
     first, second = FakeSource("A", PriceNotFoundError("nope")), FakeSource("B")
-    assert get_price("FPT", [first, second]).source == "B"
+    assert get_price("FPT", [first, second])[-1].source == "B"
     assert (len(first.calls), len(second.calls), retry_sleeps) == (1, 1, [])
 
 
@@ -108,7 +108,7 @@ def test_all_sources_fail() -> None:
 
 def test_an_unexpected_error_in_a_source_falls_back_to_the_next() -> None:
     first, second = FakeSource("A", AttributeError("1"), AttributeError("2")), FakeSource("B")
-    assert get_price("FPT", [first, second]).source == "B"
+    assert get_price("FPT", [first, second])[-1].source == "B"
 
 
 def test_main_skips_failed_symbol(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -177,3 +177,32 @@ def test_crash_is_not_no_data(tmp_path: Path) -> None:
     result = subprocess.run(cmd, capture_output=True, cwd=Path(__file__).parents[2])
     assert result.returncode == 1
     assert b"FileNotFoundError" in result.stderr
+
+
+class WindowSource(PriceSource):
+    """Returns two bars, like DNSE and VPS: the older one is evidence for the price store."""
+
+    name = "W"
+
+    def get_latest_price(self, symbol: str) -> Price:
+        return self.get_recent_prices(symbol)[-1]
+
+    def get_recent_prices(self, symbol: str) -> list[Price]:
+        return [
+            Price.model_validate(
+                dict(symbol=symbol, source=self.name, date=day, open=1, high=2, low=1, close=2, volume=10)
+            )
+            for day in ("2026-10-22", "2026-10-23")
+        ]
+
+
+def test_the_recent_bars_go_into_the_file(tmp_path: Path) -> None:
+    output = tmp_path / "out.json"
+    assert main(write_csv(tmp_path / "s.csv", "AAA", "BBB"), output, [WindowSource()], delay=0, log=FakeLogger()) == 0
+    rows = json.loads(output.read_text(encoding="utf-8"))
+    assert [(row["symbol"], row["date"]) for row in rows] == [
+        ("AAA", "2026-10-22"),
+        ("AAA", "2026-10-23"),
+        ("BBB", "2026-10-22"),
+        ("BBB", "2026-10-23"),
+    ]

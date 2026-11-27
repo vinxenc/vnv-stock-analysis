@@ -96,3 +96,12 @@ def test_other_http_errors_propagate(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(niquests.HTTPError):
         DNSE().get_latest_price("FPT")
+
+
+def test_get_recent_prices_returns_every_bar_ascending(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(TARGET, lambda url: PAYLOAD)
+    bars = DNSE().get_recent_prices("FPT")
+    assert [(bar.date, bar.close, bar.volume) for bar in bars] == [
+        (date(2026, 10, 22), 57.4, 10088500),
+        (date(2026, 10, 23), 57.0, 7090600),
+    ]

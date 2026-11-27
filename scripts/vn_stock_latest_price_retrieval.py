@@ -1,5 +1,9 @@
 """Fetch the latest daily price of every symbol in a CSV and write them as one JSON array.
 
+With each latest bar the file holds the older bars the source returned with it (DNSE and VPS: the sessions of the last
+10 days; VNDirect: none), ascending per symbol. The price store upserts only the latest one and compares the others
+with the stored bars to see a dividend adjustment (`libs/prices/adjustment.py`).
+
 Usage: uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]
 Defaults: data/hose_symbols.csv  out/vn_stock_latest_prices.json
 Sources per symbol: DNSE -> VPS -> VNDirect, 1 retry each (tenacity). A symbol that fails everywhere is skipped.
@@ -33,13 +37,13 @@ def read_symbols(path: Path) -> list[str]:
 @retry(
     stop=stop_after_attempt(2), wait=wait_fixed(1), retry=retry_if_not_exception_type(PriceNotFoundError), reraise=True
 )
-def fetch(source: PriceSource, symbol: str) -> Price:
+def fetch(source: PriceSource, symbol: str) -> list[Price]:
     """One source, 1 retry after a failure; an unknown ticker will not appear on a second try, so no retry then."""
-    return source.get_latest_price(symbol)
+    return source.get_recent_prices(symbol)
 
 
-def get_price(symbol: str, sources: Sequence[PriceSource] = SOURCES) -> Price:
-    """First source that answers wins."""
+def get_price(symbol: str, sources: Sequence[PriceSource] = SOURCES) -> list[Price]:
+    """The recent bars of the first source that answers, the latest last."""
     errors = []
     for source in sources:
         try:
@@ -64,7 +68,7 @@ def main(
     log: Logger = logger,
 ) -> int:
     symbols = read_symbols(symbols_csv)
-    prices: list[Price] = []
+    prices: list[list[Price]] = []
     skipped: list[str] = []
     for index, symbol in enumerate(symbols, 1):
         pause_between(index, delay, sleep)
@@ -75,7 +79,7 @@ def main(
             log.warning("[%d/%d] %s skipped: %s", index, len(symbols), symbol, error)
         else:
             prices.append(price)
-            log.info("[%d/%d] %s ok (%s)", index, len(symbols), symbol, price.source)
+            log.info("[%d/%d] %s ok (%s)", index, len(symbols), symbol, price[-1].source)
     log.info("fetched %d, skipped %d: %s", len(prices), len(skipped), " ".join(skipped))
     output_json.unlink(missing_ok=True)  # never leave an earlier run's file looking like today's result
     if not prices:
@@ -90,7 +94,7 @@ def main(
         )
         return NO_DATA
     output_json.parent.mkdir(parents=True, exist_ok=True)
-    rows = [price.model_dump(mode="json") for price in prices]
+    rows = [bar.model_dump(mode="json") for recent in prices for bar in recent]
     output_json.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
     return 0
 

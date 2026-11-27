@@ -68,3 +68,9 @@ def test_invalid_symbol_rejected_before_any_request(monkeypatch: pytest.MonkeyPa
 
     with pytest.raises(PriceNotFoundError, match="invalid symbol"):
         VPS().get_latest_price("FPT&x=1")
+
+
+def test_get_recent_prices_returns_every_bar(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(TARGET, lambda url: PAYLOAD)
+    bars = VPS().get_recent_prices("FPT")
+    assert len(bars) == len(PAYLOAD["t"]) and bars[-1] == VPS().get_latest_price("FPT")
