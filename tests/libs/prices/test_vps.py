@@ -5,13 +5,14 @@ import pytest
 from libs.prices import VPS, Price, PriceNotFoundError, PriceSource
 
 TARGET = "libs.prices.vps.http_get_json"
+OCTOBER = (date(2026, 10, 1), date(2026, 10, 31))
 
 
 def ts(*args: int) -> int:
     return int(datetime(*args, tzinfo=UTC).timestamp())
 
 
-# two sessions; the second one is the latest and must be picked
+# two sessions of October 2026
 PAYLOAD = {
     "t": [ts(2026, 10, 22, 3), ts(2026, 10, 23, 3)],
     "o": [58.0, 57.2],
@@ -22,27 +23,22 @@ PAYLOAD = {
 }
 
 
-def test_get_latest_price(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_history(monkeypatch: pytest.MonkeyPatch) -> None:
     urls: list[str] = []
     monkeypatch.setattr(TARGET, lambda url: urls.append(url) or PAYLOAD)
     source = VPS()
 
-    price = source.get_latest_price("fpt")
+    bars = source.get_history("fpt", *OCTOBER)
 
     assert isinstance(source, PriceSource)
-    assert price == Price.model_validate(
-        dict(
-            symbol="FPT",
-            source="VPS",
-            date=date(2026, 10, 23),
-            open=57.2,
-            high=57.2,
-            low=56.6,
-            close=57.0,
-            volume=7090600,
-        )
-    )
+    assert bars[-1] == Price.model_validate(
+        dict(symbol="FPT", source="VPS", date=date(2026, 10, 23), open=57.2, high=57.2, low=56.6, close=57.0,
+             volume=7090600)
+    )  # fmt: skip
+    assert [bar.date for bar in bars] == [date(2026, 10, 22), date(2026, 10, 23)]
+    assert all(OCTOBER[0] <= bar.date <= OCTOBER[1] for bar in bars)
     assert urls[0].startswith("https://histdatafeed.vps.com.vn/") and "symbol=FPT&" in urls[0]
+    assert f"from={ts(2026, 9, 30, 17)}&to={ts(2026, 10, 31, 16, 59, 59)}" in urls[0]
 
 
 def test_date_uses_vietnam_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,14 +46,12 @@ def test_date_uses_vietnam_timezone(monkeypatch: pytest.MonkeyPatch) -> None:
     data = {"t": [ts(2026, 10, 22, 18)], "o": [1], "h": [1], "l": [1], "c": [1], "v": [1]}
     monkeypatch.setattr(TARGET, lambda url: data)
 
-    assert VPS().get_latest_price("FPT").date == date(2026, 10, 23)
+    assert [bar.date for bar in VPS().get_history("FPT", *OCTOBER)] == [date(2026, 10, 23)]
 
 
-def test_empty_payload_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(TARGET, lambda url: {"t": []})
-
-    with pytest.raises(PriceNotFoundError, match="ZZZ"):
-        VPS().get_latest_price("ZZZ")
+def test_no_data_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(TARGET, lambda url: {"s": "no_data"})
+    assert VPS().get_history("ZZZ", *OCTOBER) == []
 
 
 def test_invalid_symbol_rejected_before_any_request(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -67,4 +61,4 @@ def test_invalid_symbol_rejected_before_any_request(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(TARGET, boom)
 
     with pytest.raises(PriceNotFoundError, match="invalid symbol"):
-        VPS().get_latest_price("FPT&x=1")
+        VPS().get_history("FPT&x=1", *OCTOBER)

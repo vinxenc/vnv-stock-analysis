@@ -39,6 +39,16 @@ class ScreenHistory(SQLModel, table=True):
     date: dt.date = Field(primary_key=True)
 
 
+class PriceSyncHistory(SQLModel, table=True):
+    """The newest session of each price sync run, written with the prices in one transaction. The next run fetches
+    from the working day after the newest one (never the wall-clock day: a delayed cron run must not skip or double a
+    session)."""
+
+    __tablename__ = "vn_stock_price_sync_history"
+
+    date: dt.date = Field(primary_key=True)
+
+
 class Ranking(SQLModel, table=True):
     """The scores of one screened session, one row per timeframe and symbol: `out/vn_stock_analysis.json` kept for
     good (the artifact expires after 7 days). Upserted by `vn_stock_analyze.store`. No rank column: a rerun can leave

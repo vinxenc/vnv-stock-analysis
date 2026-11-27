@@ -27,20 +27,12 @@ from libs.constants import MIN_COVERAGE, NO_DATA, NOT_DUE, VN_TZ
 from libs.db import connect
 from libs.db.models import Price, ScreenHistory
 from libs.logger import Logger, LogxideLogger
-from scripts.vn_holiday import off_reason
+from scripts.vn_holiday import next_session
 
 MIN_TURNOVER = 20_000_000  # thousand VND (prices are in thousand VND) = 20 billion VND per session
 SESSION_FILE = "screen_session.txt"  # the ISO date screened, next to the shortlist
 SESSIONS = 20  # rows, not calendar days (holidays); a symbol with fewer rows is averaged over the rows it has
 logger = LogxideLogger("vn_stock_screen")
-
-
-def next_session(last: dt.date) -> dt.date:
-    """The first working day after `last`: weekends and Vietnamese public holidays are skipped."""
-    day = last + dt.timedelta(days=1)
-    while off_reason(day):
-        day += dt.timedelta(days=1)
-    return day
 
 
 def screen(engine: Engine, today: dt.date, log: Logger = logger) -> list[str]:

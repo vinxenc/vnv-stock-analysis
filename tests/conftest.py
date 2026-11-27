@@ -49,5 +49,6 @@ def engine(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Engine:
     engine = connect()
     with engine.begin() as connection:
         tables = "vn_stock_prices, vn_stock_screen_history, vn_stock_rankings, vn_stock_decisions"
+        tables += ", vn_stock_price_sync_history"
         connection.execute(text(f"TRUNCATE {tables}"))
     return engine

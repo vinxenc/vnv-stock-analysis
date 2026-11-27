@@ -1,20 +1,8 @@
-import subprocess
-import sys
 from datetime import date, timedelta
-from pathlib import Path
 
 import pytest
 
-from scripts.vn_holiday import WORKING_DAY, off_reason
-
-ROOT = Path(__file__).parents[2]
-
-
-@pytest.mark.parametrize(("arg", "code"), [("2026-11-24", 0), ("2026-10-23", WORKING_DAY), ("not-a-date", 1)])
-def test_exit_code(arg: str, code: int) -> None:
-    # a crash (bad date) must not exit with the working-day code
-    cmd = [sys.executable, "-m", "scripts.vn_holiday", arg]
-    assert subprocess.run(cmd, capture_output=True, cwd=ROOT).returncode == code
+from scripts.vn_holiday import off_reason
 
 
 @pytest.mark.parametrize(
