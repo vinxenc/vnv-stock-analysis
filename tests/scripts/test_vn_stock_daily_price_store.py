@@ -2,11 +2,12 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 from sqlmodel import Session, select
 
 from libs.db.models import Price, PriceAdjustment
@@ -195,6 +196,19 @@ def test_too_many_adjustments_store_nothing(tmp_path: Path, engine: Engine) -> N
     with pytest.raises(RuntimeError, match="stored nothing"):
         main(write_json(tmp_path / "w.json", *window), engine)
     assert {price.close for price in stored(engine)} == {10.0} and adjustments(engine) == []
+
+
+def test_one_store_at_a_time(tmp_path: Path, engine: Engine) -> None:
+    """A second run waits for the first to commit, so it sees the adjusted bars and never applies a factor twice."""
+    path = write_json(tmp_path / "p.json", row("AAA"))
+    with engine.begin() as connection:
+        connection.execute(text("SELECT pg_advisory_xact_lock(hashtext('vn_stock_daily_price_store'))"))
+        run = threading.Thread(target=main, args=(path, engine))
+        run.start()
+        run.join(timeout=0.5)
+        assert run.is_alive()  # blocked on the lock
+    run.join(timeout=5)
+    assert [price.symbol for price in stored(engine)] == ["AAA"]
 
 
 class FakeLog:

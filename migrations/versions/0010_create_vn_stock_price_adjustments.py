@@ -4,7 +4,8 @@ The log of the dividend / split adjustments the price store applied to `vn_stock
 is adjusted in place, as of the newest fetch, like the source's own history). One row per adjustment: the symbol, the
 last date it adjusted (`through`; the ex-date is a later session, often the next one), the factor every price up to
 that date was multiplied by, the source whose bars showed it, how many bars changed and when. Dividing a bar by the
-product of the factors of the rows whose `through` is on or after its date gives the price as first stored.
+product of the factors of the rows whose `through` is on or after its date gives the price as first stored only
+approximately: the bars the source returned are replaced by its own values, rounded to 0.01.
 `factor` is guarded by a CHECK (> 0), not by the code alone. The key is a plain `id`: two adjustments can share a
 symbol and `through` (a halted symbol, a factor the source corrects a day later), and a duplicate must never fail the
 whole store.

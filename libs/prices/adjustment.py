@@ -64,7 +64,7 @@ def detect(fetched: list[Price], stored: dict[dt.date, Price]) -> Adjustment | N
     for bar, old in evidence:
         if not _fits(bar, old, factor):
             raise InconsistentBars(f"{symbol}: {bar.date} does not fit the factor {factor:.4f}")
-    through, replaced = changed[-1][0].date, [bar for bar, _ in changed]
+    through = changed[-1][0].date
     for bar in fetched:  # e.g. the latest session stored from VPS on a day DNSE failed
         old = stored.get(bar.date)
         if bar.date <= through or old is None:
@@ -72,5 +72,5 @@ def detect(fetched: list[Price], stored: dict[dt.date, Price]) -> Adjustment | N
         if old.source == bar.source or not moved(bar, old) or not _fits(bar, old, factor):
             break
         through = bar.date
-        replaced.append(bar)
-    return Adjustment(factor, replaced)
+    # every stored bar the source returned up to `through`, of any source: multiplied, then replaced by the source's
+    return Adjustment(factor, [bar for bar in fetched if bar.date <= through and bar.date in stored])

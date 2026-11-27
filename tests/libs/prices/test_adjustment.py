@@ -105,6 +105,13 @@ def test_a_later_bar_of_another_source_is_adjusted_too() -> None:
     assert adjustment.fetched == fetched[:5]
 
 
+def test_a_bar_of_another_source_inside_the_run_is_replaced() -> None:
+    """D[1] came from VPS, maybe already adjusted when stored: the store must not leave it multiplied twice."""
+    fetched = [bar(D[i], CLOSES[i], factor=0.9858) for i in range(5)] + [bar(D[5], CLOSES[5])]
+    adjustment = detect(fetched, {**stored(0, 2, 3, 4), **stored(1, source="VPS", factor=0.9858)})
+    assert adjustment is not None and adjustment.fetched == fetched[:5]
+
+
 def test_a_later_bar_of_another_source_that_does_not_fit_stops_the_run() -> None:
     fetched = [bar(D[i], CLOSES[i], factor=0.9858) for i in range(5)]
     adjustment = detect(fetched, {**stored(0, 1, 2, 3), **stored(4, source="VPS", factor=0.9858)})

@@ -12,7 +12,7 @@ from itertools import groupby
 from operator import attrgetter
 from pathlib import Path
 
-from sqlalchemy import Connection, Engine, select, update
+from sqlalchemy import Connection, Engine, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from libs.constants import NO_DATA
@@ -65,6 +65,8 @@ def store(prices: list[Price], engine: Engine, log: Logger = logger) -> list[Adj
     ordered = sorted(prices, key=attrgetter("symbol", "date"))
     by_symbol = {symbol: list(bars) for symbol, bars in groupby(ordered, key=attrgetter("symbol"))}
     with engine.begin() as connection:
+        # one store at a time: two overlapping runs would both see the raw bars and apply the same factor twice
+        connection.execute(text("SELECT pg_advisory_xact_lock(hashtext('vn_stock_daily_price_store'))"))
         query = select(Price).where(Price.symbol.in_(by_symbol), Price.date >= min(price.date for price in prices))
         stored: dict[str, dict] = {symbol: {} for symbol in by_symbol}
         for row in connection.execute(query).mappings():
