@@ -3,7 +3,7 @@ today) of every symbol in a CSV, one request per symbol, and write them as one J
 
 Usage: uv run python -m scripts.vn_stock_latest_price_retrieval [symbols_csv] [output_json]
 Defaults: data/hose_symbols.csv  out/vn_stock_latest_prices.json
-Sources per symbol: DNSE -> VPS -> VNDirect, 1 retry each (tenacity). A symbol that fails everywhere is skipped.
+Sources per symbol: DNSE -> VNDirect -> VPS, 1 retry each (tenacity). A symbol that fails everywhere is skipped.
 A session is written when at least MIN_COVERAGE of the symbols have a bar on it. One below it after the newest such
 session is left out and stays due (a partial outage, or bars not published yet: they never reach the database); one
 below it before that session is dropped, since a retry asks the same span and would not fill it (a market closure
@@ -29,7 +29,8 @@ from libs.prices.base import validate_symbol
 from scripts.vn_holiday import working_days
 from scripts.vn_stock_price_sync_session import from_env
 
-SOURCES = (DNSE(), VPS(), VNDirect())
+# VPS last: its bars before mid-2021 ignore the older corporate actions (see vn_stock_dividend_history)
+SOURCES = (DNSE(), VNDirect(), VPS())
 logger = LogxideLogger("vn_stock_latest_price_retrieval")
 
 
