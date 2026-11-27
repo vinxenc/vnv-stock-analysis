@@ -1,6 +1,6 @@
 # Phase 3 — Logistic regression and LightGBM on the screening indicators
 
-Status: **in progress** (2026-11-14; LightGBM added the same day). Steps 0 and 1 are done (2026-11-26; the look-ahead check ran on production on 2026-11-27, every difference explained by two bars re-stored after the live run). Next: step 2. Research first (`research/`), pipeline only if it wins. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** Related: [phase-1-sql-screens.md](phase-1-sql-screens.md) ("Scoring design", whose weights and thresholds are placeholders), [phase-4-foundation-model-forecasts.md](phase-4-foundation-model-forecasts.md) (why the zero-shot forecasters were set aside), [phase-5-rd-agent.md](phase-5-rd-agent.md).
+Status: **in progress** (2026-11-14; LightGBM added the same day). Steps 0 and 1 are done (2026-11-26; the look-ahead check ran on production on 2026-11-27 and found 46 differences (exit 1), every one explained by two bars re-stored after the live run, none a panel bug). Next: step 2. Research first (`research/`), pipeline only if it wins. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** Related: [phase-1-sql-screens.md](phase-1-sql-screens.md) ("Scoring design", whose weights and thresholds are placeholders), [phase-4-foundation-model-forecasts.md](phase-4-foundation-model-forecasts.md) (why the zero-shot forecasters were set aside), [phase-5-rd-agent.md](phase-5-rd-agent.md).
 
 ## Goal
 
@@ -58,7 +58,7 @@ Replays `libs/analysis` on every past session: for session t, the same window th
 
   Built (`lookahead_check` in `panel.py`, run by `research/export_features.py`, tested on stored rankings made by the live path); it compares every key of the stored `raw`, `percentile` included, so it also checks that the replayed universe is the live one. The local database has no ranking, so it compared 0 sessions there; the user ran it on production (it only reads): `DATABASE_URL=<production> uv run --group research python -m research.export_features`, exit 0 only when at least one session was compared and nothing differs.
 
-  **Production run (2026-11-27): passes, every difference explained.** 11 sessions compared (2026-11-11 to 2026-11-26), 9 of them identical, the old-form #12 rows included. The 46 differences come from two bars only, re-stored after the live run had scored them:
+  **Production run (2026-11-27): 46 differences, exit 1, every one explained; no difference is a panel bug.** 11 sessions compared (2026-11-11 to 2026-11-26), 9 of them identical, the old-form #12 rows included. The 46 differences come from two bars only, re-stored after the live run had scored them:
   - BVH 2026-11-25: the 19:13 VN sync stored close 56.9, the scheduled sync at 01:12 VN the next night stored 56.09 (open, high, low scaled by the same 0.9858, volume unchanged).
   - FPT 2026-11-26: 44.5 at 19:37 VN, then 43.5 at 00:54 VN (1,000 VND less, about 0.9775).
   - Every other difference is a `percentile` of #6 or #20 with an identical raw value: the two changed values moved their neighbours in the ranking.
@@ -70,7 +70,7 @@ Chosen while building it (2026-11-26, change if wrong):
 - #12's `up_day` is not a column: the CSV keeps 21 inputs (review-debt item 12), so the model sees the real volume ratio without the up-day gate the score applies. Adding `up_day` would make 22.
 - `score` lacks #5 and #17 until a symbol has 200 and 250 rows, so early in the panel it is out of at most 92 points and the `score >= 40` population is a little harder to reach there than live. The step 2 helper compares a result with the base rate of the same months, so this only shifts the candidates over time.
 
-Done when the CSV exists, the look-ahead check passes and the README lists the script. Done (2026-11-27).
+Done when the CSV exists, the look-ahead check passes and the README lists the script. Done (2026-11-27): the check did not pass as such (46 differences, exit 1), but every difference is explained by a stored bar that changed after the live run, which the step allows.
 
 ## Step 2. Baselines (the bar to beat)
 

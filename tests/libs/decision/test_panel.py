@@ -138,7 +138,7 @@ SCENARIOS = {
     "hit": ({"X": path(20.0, 20.2, 20.4, 20.4, 20.6, 21.0, 30.0)}, ()),
     "miss": ({"X": path(50.0, 49.0, 48.0, 48.0, 48.5, 49.0)}, ()),
     **{
-        f"exact {start}": ({"X": path(start, start, start, start, start, end)}, ())
+        f"exact {start} to {end}": ({"X": path(start, start, start, start, start, end)}, ())
         for start, end in [(10.0, 10.3), (12.5, 12.875), (45.6, 46.968), (0.7, 0.721), (10.0, 10.2999)]
     },
     "ceiling kept": ({"X": path(10.0, 10.7, 10.7, 10.7, 10.7, 10.7)}, ()),

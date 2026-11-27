@@ -20,7 +20,7 @@ The decisions are the system's output for the user to screen with; the user deci
 
 - [x] Phase 1 has run reliably for a few days (green runs on 2026-11-11, 12 and 13; the one cron failure, 11-12, was a false alarm: GitHub started the run after midnight VN).
 - [ ] Accounts and keys, created by the user and never seen by Claude: an OpenRouter API key (the LLM provider, see "Decisions"), TypeSafe (or reseller) key for Jev, a Telegram bot (BotFather) and the channel it posts to (bot added as admin), its chat id. The OpenRouter key is done (2026-11-16); Jev and Telegram are not yet.
-- [x] For TabICL only: Phase 3 step 1 (`libs/decision/panel.py`) is built (2026-11-26; look-ahead check passed on production 2026-11-27). Steps 2 and 3 of Phase 3 are needed too (review-debt item 8, open).
+- [x] For TabICL only: Phase 3 step 1 (`libs/decision/panel.py`) is built (2026-11-26; on production on 2026-11-27 the look-ahead check found 46 differences and exited 1, every one explained by two bars re-stored after the live run, see Phase 3 step 1). Steps 2 and 3 of Phase 3 are needed too (review-debt item 8, open).
 
 ## Decisions and open items
 

@@ -65,14 +65,13 @@ def main(output_csv: Path = Path("out/features.csv")) -> int:
         if any(r["beat_median"] is not None for r in s)
     ]
     log.info(f"{output_csv}: {len(rows)} rows, {len(by_session)} sessions ({start} to {end})")
-    log.info(f"beat_median share per session: min {min(beat):.3f}, max {max(beat):.3f}")
+    # a panel of 70 to 74 sessions has no label yet, one without a liquid symbol no session: log, keep the check
+    log.info(f"beat_median share per session: {f'min {min(beat):.3f}, max {max(beat):.3f}' if beat else 'none'}")
     log.info(
         f"hit_3pct_5 share: whole universe {share(rows, 'hit_3pct_5')}, candidates {share(candidates, 'hit_3pct_5')}"
     )
-    log.info(
-        f"candidates (score >= {MIN_SCORE}) per session: median {median(per_session)}, min {min(per_session)},"
-        f" sessions with none {sum(n == 0 for n in per_session)}"
-    )
+    counts = f"median {median(per_session)}, min {min(per_session)}" if per_session else "no session"
+    log.info(f"candidates (score >= {MIN_SCORE}) per session: {counts}, sessions with none {per_session.count(0)}")
 
     compared, mismatches = panel.lookahead_check(engine, indicators, prices)
     log.info(f"look-ahead check: {compared} sessions of vn_stock_rankings compared, {len(mismatches)} differences")
