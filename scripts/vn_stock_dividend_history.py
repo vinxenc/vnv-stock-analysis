@@ -79,7 +79,12 @@ def history(symbol: str, last: dt.date, sources: Sequence[PriceSource], pause: C
 
 def restore(symbol: str, years: list[list[Price]], engine: Engine, log: Logger) -> None:
     """Upsert the bars, and delete the symbol's stored rows the source no longer has within the span of each year it
-    returned (never in a year it returned nothing for), in one transaction."""
+    returned (never in a year it returned nothing for), in one transaction.
+
+    The boundary is the first and last bar returned, never the span asked: a stored row past the last bar of a year is
+    kept, since a source that lags on a session must not delete a valid bar that no later run would fetch again. The
+    sessions due are the exception that needs no delete: the retrieval right after this job fetches them again for
+    every symbol, through every source."""
     bars = [bar for year in years for bar in year]
     spans = [Price.date.between(year[0].date, year[-1].date) for year in years if year]
     stale = delete(Price).where(Price.symbol == symbol, or_(*spans), Price.date.not_in([bar.date for bar in bars]))
