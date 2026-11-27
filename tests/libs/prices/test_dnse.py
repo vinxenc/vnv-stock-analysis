@@ -105,3 +105,14 @@ def test_get_recent_prices_returns_every_bar_ascending(monkeypatch: pytest.Monke
         (date(2026, 10, 22), 57.4, 10088500),
         (date(2026, 10, 23), 57.0, 7090600),
     ]
+
+
+def test_an_invalid_older_bar_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(TARGET, lambda url: {**PAYLOAD, "c": [0, 57.0]})
+    assert [bar.date for bar in DNSE().get_recent_prices("FPT")] == [date(2026, 10, 23)]
+
+
+def test_an_invalid_latest_bar_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(TARGET, lambda url: {**PAYLOAD, "c": [57.4, 0]})
+    with pytest.raises(ValueError, match="close"):
+        DNSE().get_recent_prices("FPT")

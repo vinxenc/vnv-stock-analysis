@@ -169,15 +169,29 @@ def test_an_unexplained_move_keeps_the_stored_newest_bar(tmp_path: Path, engine:
     for day in DAYS[:3]:
         main(write_json(tmp_path / f"{day}.json", ohlc("VPX", day, 21.15)), engine)
     window = [ohlc("VPX", day, 21.15, factor=0.69) for day in DAYS[:3]]
-    window[1]["volume"] = 7  # not one adjustment: the warning path
+    window[1] = ohlc("VPX", DAYS[1], 21.15, factor=0.8)  # not one factor: the warning path
     assert main(write_json(tmp_path / "w.json", *window), engine, FakeLog()) == 0
     assert [price.close for price in stored(engine)] == [21.15, 21.15, 21.15]
 
 
+def test_an_unexplained_move_still_upserts_a_correction_of_the_newest_bar(tmp_path: Path, engine: Engine) -> None:
+    """A rerun after a bar fetched before the close: the older bars are inconsistent, the newest is a correction."""
+    for day in DAYS[:2]:
+        main(write_json(tmp_path / f"{day}.json", ohlc("HPG", day, 27.0)), engine)
+    main(write_json(tmp_path / "partial.json", ohlc("HPG", DAYS[2], 27.3, volume=500)), engine)
+    window = [ohlc("HPG", DAYS[0], 27.0), ohlc("HPG", DAYS[1], 27.0, factor=0.9), ohlc("HPG", DAYS[2], 27.5)]
+    log = FakeLog()
+    assert main(write_json(tmp_path / "w.json", *window), engine, log) == 0
+    assert [(price.close, price.volume) for price in stored(engine)] == [(27.0, 1000), (27.0, 1000), (27.5, 1000)]
+    assert any("not adjusted: HPG" in line for line in log.lines)
+
+
 def test_too_many_adjustments_store_nothing(tmp_path: Path, engine: Engine) -> None:
     symbols = [f"S{n:02}" for n in range(MAX_ADJUSTED + 1)]
-    main(write_json(tmp_path / "0.json", *[ohlc(symbol, DAYS[0], 10.0) for symbol in symbols]), engine)
-    window = [row for s in symbols for row in (ohlc(s, DAYS[0], 10.0, factor=0.9), ohlc(s, DAYS[1], 9.0))]
+    for day in DAYS[:2]:
+        main(write_json(tmp_path / f"{day}.json", *[ohlc(symbol, day, 10.0) for symbol in symbols]), engine)
+    window = [ohlc(s, day, 10.0, factor=0.9) for s in symbols for day in DAYS[:2]]
+    window += [ohlc(s, DAYS[2], 9.0) for s in symbols]
     with pytest.raises(RuntimeError, match="stored nothing"):
         main(write_json(tmp_path / "w.json", *window), engine)
     assert {price.close for price in stored(engine)} == {10.0} and adjustments(engine) == []

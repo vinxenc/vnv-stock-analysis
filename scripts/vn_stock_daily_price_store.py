@@ -8,8 +8,8 @@ it twice stores the same data once. The older bars are evidence only (`libs/pric
 bars are the stored ones times one factor, every stored bar of the symbol up to the last changed one is multiplied by it
 (volume unchanged), the source's own bars replace those it returned, and the adjustment is logged in
 `vn_stock_price_adjustments`, all in the same transaction as the upsert. Bars that moved in another way are logged as a
-warning and left alone, the newest bar too when its date is already stored. More than MAX_ADJUSTED symbols adjusted in
-one run stores nothing: that is a source changing its quotes, not dividends.
+warning and left alone, the newest bar too when it is stored and moved with the same volume. More than MAX_ADJUSTED
+symbols adjusted in one run stores nothing: that is a source changing its quotes, not dividends.
 Exit 0 = rows stored, 4 = the file holds no price (nothing stored), anything else = crash.
 """
 
@@ -24,7 +24,7 @@ from libs.constants import NO_DATA
 from libs.db import connect
 from libs.db.models import Price, PriceAdjustment
 from libs.logger import Logger, LogxideLogger
-from libs.prices.adjustment import Adjustment, InconsistentBars, detect
+from libs.prices.adjustment import Adjustment, InconsistentBars, detect, moved
 
 MAX_ADJUSTED = 20  # symbols per run; the nights seen so far had 2 and 3
 logger = LogxideLogger("vn_stock_daily_price_store")
@@ -82,7 +82,10 @@ def store(prices: list[Price], engine: Engine, log: Logger = logger) -> list[Adj
                 adjustment = detect(bars, stored[symbol])
             except InconsistentBars as error:
                 log.warning("not adjusted: %s", error)
-                if bars[-1].date in stored[symbol]:  # it may be a lone adjusted bar: keep the stored one
+                old = stored[symbol].get(bars[-1].date)
+                # a moved newest bar with the same volume may be a lone adjusted one: keep the stored bar; another
+                # volume is a correction of the day, upserted as always
+                if old and old.volume == bars[-1].volume and moved(bars[-1], old):
                     del newest[symbol]
                 continue
             if adjustment:

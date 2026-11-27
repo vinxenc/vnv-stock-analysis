@@ -69,14 +69,46 @@ def test_a_bar_already_adjusted_is_left_alone() -> None:
     ("fetched", "message"),
     [
         ([bar(D[0], CLOSES[0]), bar(D[1], CLOSES[1], factor=0.9), bar(D[2], CLOSES[2])], "unchanged ones between"),
-        ([bar(D[0], CLOSES[0], factor=0.9, volume=5), bar(D[1], CLOSES[1]), bar(D[2], CLOSES[2])], "another volume"),
+        ([bar(D[0], CLOSES[0], factor=0.9, volume=5), bar(D[1], CLOSES[1]), bar(D[2], CLOSES[2])], "too few"),
+        ([bar(D[0], CLOSES[0], factor=0.9), bar(D[1], CLOSES[1]), bar(D[2], CLOSES[2])], "too few"),
+        ([bar(D[i], CLOSES[i]) for i in range(2)] + [bar(D[2], CLOSES[2], factor=0.9)], "unchanged ones between"),
         ([bar(D[0], CLOSES[0], factor=0.9), bar(D[1], CLOSES[1], factor=0.95), bar(D[2], CLOSES[2])], "does not fit"),
     ],
-    ids=["a gap", "a volume", "two factors"],
+    ids=["a gap", "a volume", "one bar", "a lone latest bar", "two factors"],
 )
 def test_moves_that_are_not_one_adjustment(fetched: list[Price], message: str) -> None:
     with pytest.raises(InconsistentBars, match=message):
         detect(fetched, stored(0, 1, 2))
+
+
+def test_a_lone_pair_is_no_factor() -> None:
+    """VNDirect returns the latest bar alone: a re-quote with the same volume never rescales the whole history."""
+    with pytest.raises(InconsistentBars, match="too few"):
+        detect([bar(D[4], CLOSES[4], factor=0.98)], stored(4))
+
+
+def test_a_bar_stored_before_the_close_is_replaced_not_evidence() -> None:
+    """D[2] was stored at 14:45 with a partial volume and an earlier close: the source's final bar replaces it."""
+    fetched = [bar(D[i], CLOSES[i], factor=0.9858) for i in range(5)] + [bar(D[5], CLOSES[5])]
+    old = {**stored(0, 1, 3, 4), D[2]: bar(D[2], 57.5, volume=400)}
+    adjustment = detect(fetched, old)
+    assert adjustment is not None and adjustment.through == D[4]
+    assert adjustment.factor == pytest.approx(0.9858, abs=1e-4)
+    assert adjustment.fetched == fetched[:5]
+
+
+def test_a_later_bar_of_another_source_is_adjusted_too() -> None:
+    """D[4] came from VPS on a day DNSE failed: it is raw as well, so it is multiplied and replaced."""
+    fetched = [bar(D[i], CLOSES[i], factor=0.9858) for i in range(5)] + [bar(D[5], CLOSES[5])]
+    adjustment = detect(fetched, {**stored(0, 1, 2, 3), **stored(4, source="VPS")})
+    assert adjustment is not None and adjustment.through == D[4]
+    assert adjustment.fetched == fetched[:5]
+
+
+def test_a_later_bar_of_another_source_that_does_not_fit_stops_the_run() -> None:
+    fetched = [bar(D[i], CLOSES[i], factor=0.9858) for i in range(5)]
+    adjustment = detect(fetched, {**stored(0, 1, 2, 3), **stored(4, source="VPS", factor=0.9858)})
+    assert adjustment is not None and adjustment.through == D[3]
 
 
 def test_a_factor_must_be_positive(engine: Engine) -> None:

@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 
 import niquests
+from pydantic import ValidationError
 
 from libs.constants import VN_TZ
 from libs.db.models import Price
@@ -34,22 +35,23 @@ class PriceSource(ABC):
 
 
 def bars(source: str, symbol: str, data: dict[str, Any]) -> list[Price]:
-    """The `t/o/h/l/c/v` arrays of a TradingView-style chart payload (DNSE, VPS) as prices, ascending."""
-    return [
-        Price.model_validate(
-            dict(
-                symbol=symbol,
-                source=source,
-                date=datetime.fromtimestamp(t, VN_TZ).date(),
-                open=o,
-                high=h,
-                low=low,
-                close=c,
-                volume=v,
-            )
+    """The `t/o/h/l/c/v` arrays of a TradingView-style chart payload (DNSE, VPS) as prices, ascending. An invalid older
+    bar (a price of 0, say) is dropped: it is only evidence for the store. The latest one must be valid."""
+    *older, latest = zip(data["t"], data["o"], data["h"], data["l"], data["c"], data["v"], strict=True)
+
+    def price(t: int, o: float, h: float, low: float, c: float, v: int) -> Price:
+        date = datetime.fromtimestamp(t, VN_TZ).date()
+        return Price.model_validate(
+            dict(symbol=symbol, source=source, date=date, open=o, high=h, low=low, close=c, volume=v)
         )
-        for t, o, h, low, c, v in zip(data["t"], data["o"], data["h"], data["l"], data["c"], data["v"], strict=True)
-    ]
+
+    valid = []
+    for row in older:
+        try:
+            valid.append(price(*row))
+        except ValidationError:
+            continue
+    return [*valid, price(*latest)]
 
 
 def validate_symbol(symbol: str) -> str:
