@@ -289,6 +289,25 @@ def test_asking_again_stops_once_the_day_cannot_pass(tmp_path: Path) -> None:
     assert len(first.calls) == 20 + 3 and len(second.calls) == 3
 
 
+def test_a_source_failing_while_asking_again_keeps_the_day_due(tmp_path: Path) -> None:
+    """A passing outage is not a closure: the trading day and the later ones wait for the next run."""
+
+    class Down(Range):
+        def get_history(self, symbol: str, start: dt.date, end: dt.date) -> list[Price]:
+            if start == end:
+                self.calls.append(symbol)
+                raise OSError("down")
+            return super().get_history(symbol, start, end)
+
+    out, log = tmp_path / "out.json", FakeLogger()
+    first, second = Range("A", missing=(dt.date(2026, 12, 1),)), Down("B")
+    assert main(write_csv(tmp_path / "s.csv", "AAA", "BBB"), out, [first, second], sleep=lambda _: None, log=log,
+                sessions=(dt.date(2026, 11, 30), dt.date(2026, 12, 2))) == 0  # fmt: skip
+    assert {row["date"] for row in json.loads(out.read_text(encoding="utf-8"))} == {"2026-11-30"}
+    assert any("2026-12-01: AAA while asking again: it and later sessions stay due" in m for _, m in log.records)
+    assert len(second.calls) == 2  # one symbol, 1 retry: the first failure ends it
+
+
 def test_crash_is_not_no_data(tmp_path: Path) -> None:
     cmd = [sys.executable, "-m", "scripts.vn_stock_latest_price_retrieval", str(tmp_path / "missing.csv")]
     result = subprocess.run(cmd, capture_output=True, cwd=Path(__file__).parents[2])

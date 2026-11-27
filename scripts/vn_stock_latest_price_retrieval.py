@@ -8,8 +8,10 @@ A session is written when at least MIN_COVERAGE of the symbols have a bar on it.
 source with any bar, so a working day under it before the newest such session (a hole in that source) is asked again,
 one request per missing symbol for that day alone, which falls through to the next sources; it stops once too many
 come back empty for the day to pass. A day still under it is dropped and logged: no source has it (a market closure
-`scripts/vn_holiday.py` does not know). A day under it after the newest session that passes is left out and stays due
-(a partial outage, or bars not published yet: they never reach the database).
+`scripts/vn_holiday.py` does not know). A source that fails there (network, HTTP 5xx) proves nothing: that day and
+every later one are left out and stay due, so a trading day is never dropped on a passing outage.
+A day under it after the newest session that passes is left out and stays due (a partial outage, or bars
+not published yet: they never reach the database).
 Exit 0 = prices written, 4 = no session with enough bars (no file written), anything else = crash.
 """
 
@@ -53,15 +55,22 @@ def fetch(source: PriceSource, symbol: str, first: dt.date, last: dt.date) -> li
     return bars
 
 
+class NoBar(RuntimeError):
+    """Every source answered, and none has a bar (not a failure of one of them)."""
+
+
 def get_prices(symbol: str, first: dt.date, last: dt.date, sources: Sequence[PriceSource] = SOURCES) -> list[Price]:
-    """First source that answers wins."""
-    errors = []
+    """First source that answers wins. NoBar when every source said it has no bar, RuntimeError when one failed."""
+    errors: list[Exception] = []
     for source in sources:
         try:
             return fetch(source, symbol, first, last)
         except Exception as error:
-            errors.append(f"{source.name}: {type(error).__name__}: {error}")
-    raise RuntimeError("all sources failed: " + "; ".join(errors))
+            errors.append(error)
+    message = "all sources failed: " + "; ".join(
+        f"{source.name}: {type(error).__name__}: {error}" for source, error in zip(sources, errors, strict=True)
+    )
+    raise (NoBar if all(isinstance(error, PriceNotFoundError) for error in errors) else RuntimeError)(message)
 
 
 def refill(
@@ -73,7 +82,8 @@ def refill(
     log: Logger,
 ) -> list[Price]:
     """`prices` plus the bars the other sources have on the working days under MIN_COVERAGE before the newest day that
-    passes: one request per missing symbol and day, until too many came back empty for the day to pass."""
+    passes: one request per missing symbol and day, until too many came back empty for the day to pass. A request a
+    source fails on leaves that day undecided: it and every later day are taken out, and stay due."""
     counts = Counter(price.date for price in prices)
     passing = [day for day, count in counts.items() if count >= MIN_COVERAGE * len(symbols)]
     if not passing:
@@ -91,8 +101,11 @@ def refill(
             pause()
             try:
                 prices = prices + get_prices(symbol, day, day, sources)
-            except RuntimeError:
+            except NoBar:
                 missing += 1
+            except RuntimeError as error:
+                log.warning("%s: %s while asking again: it and later sessions stay due (%s)", day, symbol, error)
+                return [price for price in prices if price.date < day]
         found = sum(price.date == day for price in prices)
         log.info("%s: %d of %d symbols have a bar after asking again", day, found, len(symbols))
     return prices
