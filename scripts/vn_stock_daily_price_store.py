@@ -1,20 +1,15 @@
-"""Upsert the latest price of every symbol of a JSON array (see vn_stock_latest_price_retrieval) into
-`vn_stock_prices`, after applying the dividend adjustments its older bars show.
+"""Upsert the newest bar of every symbol of a JSON array (see vn_stock_latest_price_retrieval) into `vn_stock_prices`,
+after the dividend adjustments its older bars show (`libs/prices/adjustment.py`), in one transaction.
 
 Usage: DATABASE_URL=... uv run python -m scripts.vn_stock_daily_price_store [input_json]
 Default: out/vn_stock_latest_prices.json
-Per symbol, only the newest bar of the file is upserted: a row with the same (symbol, date) is overwritten, so running
-it twice stores the same data once. The older bars are evidence only (`libs/prices/adjustment.py`): when the source's
-bars are the stored ones times one factor, every stored bar of the symbol up to the last changed one is multiplied by it
-(volume unchanged), the source's own bars replace those it returned, and the adjustment is logged in
-`vn_stock_price_adjustments`, all in the same transaction as the upsert. Bars that moved in another way are logged as a
-warning and left alone, the newest bar too when it is stored and moved with the same volume. More than MAX_ADJUSTED
-symbols adjusted in one run stores nothing: that is a source changing its quotes, not dividends.
 Exit 0 = rows stored, 4 = the file holds no price (nothing stored), anything else = crash.
 """
 
 import json
 import sys
+from itertools import groupby
+from operator import attrgetter
 from pathlib import Path
 
 from sqlalchemy import Connection, Engine, select, update
@@ -50,16 +45,16 @@ def _upsert(connection: Connection, prices: list[Price]) -> None:
 def _adjust(connection: Connection, adjustment: Adjustment) -> int:
     """Multiply every stored price of the symbol up to `through`, put the source's own bars over the ones it returned,
     log it. Returns the bars changed."""
-    factor = adjustment.factor
+    factor, last = adjustment.factor, adjustment.fetched[-1]
     bars = connection.execute(
         update(Price)
-        .where(Price.symbol == adjustment.symbol, Price.date <= adjustment.through)
+        .where(Price.symbol == last.symbol, Price.date <= last.date)
         .values(open=Price.open * factor, high=Price.high * factor, low=Price.low * factor, close=Price.close * factor)
     ).rowcount
     _upsert(connection, adjustment.fetched)
     connection.execute(
         insert(PriceAdjustment).values(
-            symbol=adjustment.symbol, through=adjustment.through, factor=factor, source=adjustment.source, bars=bars
+            symbol=last.symbol, through=last.date, factor=factor, source=last.source, bars=bars
         )
     )
     return bars
@@ -67,9 +62,8 @@ def _adjust(connection: Connection, adjustment: Adjustment) -> int:
 
 def store(prices: list[Price], engine: Engine, log: Logger = logger) -> list[Adjustment]:
     """In one transaction: the adjustments the older bars show, then the newest bar of every symbol. All or nothing."""
-    by_symbol: dict[str, list[Price]] = {}
-    for price in sorted(prices, key=lambda price: (price.symbol, price.date)):
-        by_symbol.setdefault(price.symbol, []).append(price)
+    ordered = sorted(prices, key=attrgetter("symbol", "date"))
+    by_symbol = {symbol: list(bars) for symbol, bars in groupby(ordered, key=attrgetter("symbol"))}
     with engine.begin() as connection:
         query = select(Price).where(Price.symbol.in_(by_symbol), Price.date >= min(price.date for price in prices))
         stored: dict[str, dict] = {symbol: {} for symbol in by_symbol}
@@ -95,13 +89,13 @@ def store(prices: list[Price], engine: Engine, log: Logger = logger) -> list[Adj
                 f"{len(adjustments)} symbols would be adjusted (more than {MAX_ADJUSTED}): stored nothing"
             )
         for adjustment in adjustments:
-            bars = _adjust(connection, adjustment)
+            last, bars = adjustment.fetched[-1], _adjust(connection, adjustment)
             log.info(
                 "%s adjusted through %s by %.4f (%s, %d bars)",
-                adjustment.symbol,
-                adjustment.through,
+                last.symbol,
+                last.date,
                 adjustment.factor,
-                adjustment.source,
+                last.source,
                 bars,
             )
         if newest:

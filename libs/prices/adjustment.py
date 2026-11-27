@@ -24,11 +24,10 @@ class InconsistentBars(ValueError):
 
 @dataclass(frozen=True)
 class Adjustment:
-    symbol: str
-    source: str
-    through: dt.date  # the last date whose stored bar is multiplied; the ex-date is a later session
     factor: float
-    fetched: list[Price]  # the source's bars up to `through`: they replace the stored ones as they are
+    # the source's bars that replace the stored ones as they are; the last one's date is the last date multiplied (the
+    # ex-date is a later session)
+    fetched: list[Price]
 
 
 def moved(fetched: Price, stored: Price) -> bool:
@@ -74,4 +73,4 @@ def detect(fetched: list[Price], stored: dict[dt.date, Price]) -> Adjustment | N
             break
         through = bar.date
         replaced.append(bar)
-    return Adjustment(symbol, fetched[-1].source, through, factor, replaced)
+    return Adjustment(factor, replaced)

@@ -34,7 +34,7 @@ def test_an_ex_date_run_adjusts_every_older_bar() -> None:
     fetched = [bar(D[i], CLOSES[i], factor=0.9858) for i in range(5)] + [bar(D[5], CLOSES[5])]
     adjustment = detect(fetched, stored(0, 1, 2, 3, 4))
     assert adjustment is not None
-    assert (adjustment.through, adjustment.source) == (D[4], "DNSE")
+    assert (adjustment.fetched[-1].date, adjustment.fetched[-1].source) == (D[4], "DNSE")
     assert adjustment.factor == pytest.approx(0.9858, abs=1e-4)
     assert adjustment.fetched == fetched[:5]
 
@@ -43,7 +43,7 @@ def test_an_eve_run_adjusts_the_latest_bar_too() -> None:
     """DNSE after midnight on the eve: the latest bar, stored raw at 19:00, comes back adjusted with the same volume."""
     fetched = [bar(D[i], CLOSES[i], factor=0.9775) for i in range(5)]
     adjustment = detect(fetched, stored(0, 1, 2, 3, 4))
-    assert adjustment is not None and adjustment.through == D[4]
+    assert adjustment is not None and adjustment.fetched[-1].date == D[4]
 
 
 def test_a_correction_of_the_latest_bar_is_not_an_adjustment() -> None:
@@ -62,7 +62,7 @@ def test_a_bar_already_adjusted_is_left_alone() -> None:
     fetched = [bar(D[i], CLOSES[i], factor=0.9858) for i in range(6)]
     old = {**stored(0, 1, 2, 3), D[4]: bar(D[4], CLOSES[4], factor=0.9858)}
     adjustment = detect(fetched, old)
-    assert adjustment is not None and adjustment.through == D[3]
+    assert adjustment is not None and adjustment.fetched[-1].date == D[3]
 
 
 @pytest.mark.parametrize(
@@ -92,7 +92,7 @@ def test_a_bar_stored_before_the_close_is_replaced_not_evidence() -> None:
     fetched = [bar(D[i], CLOSES[i], factor=0.9858) for i in range(5)] + [bar(D[5], CLOSES[5])]
     old = {**stored(0, 1, 3, 4), D[2]: bar(D[2], 57.5, volume=400)}
     adjustment = detect(fetched, old)
-    assert adjustment is not None and adjustment.through == D[4]
+    assert adjustment is not None and adjustment.fetched[-1].date == D[4]
     assert adjustment.factor == pytest.approx(0.9858, abs=1e-4)
     assert adjustment.fetched == fetched[:5]
 
@@ -101,14 +101,14 @@ def test_a_later_bar_of_another_source_is_adjusted_too() -> None:
     """D[4] came from VPS on a day DNSE failed: it is raw as well, so it is multiplied and replaced."""
     fetched = [bar(D[i], CLOSES[i], factor=0.9858) for i in range(5)] + [bar(D[5], CLOSES[5])]
     adjustment = detect(fetched, {**stored(0, 1, 2, 3), **stored(4, source="VPS")})
-    assert adjustment is not None and adjustment.through == D[4]
+    assert adjustment is not None and adjustment.fetched[-1].date == D[4]
     assert adjustment.fetched == fetched[:5]
 
 
 def test_a_later_bar_of_another_source_that_does_not_fit_stops_the_run() -> None:
     fetched = [bar(D[i], CLOSES[i], factor=0.9858) for i in range(5)]
     adjustment = detect(fetched, {**stored(0, 1, 2, 3), **stored(4, source="VPS", factor=0.9858)})
-    assert adjustment is not None and adjustment.through == D[3]
+    assert adjustment is not None and adjustment.fetched[-1].date == D[3]
 
 
 def test_a_factor_must_be_positive(engine: Engine) -> None:
