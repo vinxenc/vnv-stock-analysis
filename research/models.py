@@ -142,8 +142,8 @@ def calibration(predicted: pd.DataFrame, label: str) -> pd.DataFrame:
 def session_auc(predicted: pd.DataFrame, label: str) -> float:
     """Mean AUC within a session (sessions with both classes), so the market level of a session plays no part."""
     rows = predicted[predicted[label].notna() & predicted["pred"].notna()]
-    rows = rows.groupby("date").filter(lambda g: g[label].nunique() == 2)
-    return float(rows.groupby("date").apply(lambda g: auc(g["pred"], g[label])).mean())
+    per_session = rows.groupby("date").apply(lambda g: auc(g["pred"], g[label]) if g[label].nunique() == 2 else np.nan)
+    return float(per_session.mean())
 
 
 def volatility_check(df: pd.DataFrame, predicted: dict[str, pd.DataFrame], label: str) -> list[str]:
@@ -191,11 +191,13 @@ def main(features_csv: Path = Path("out/features.csv"), output_md: Path = Path("
             reports[f"{model}[{label}]"] = evaluate(predicted, probability=probability)
             extra[model] = (predicted, folds)
             log.info(f"{model} on {label} done")
+        lgb_predicted, lgb_folds = extra["lightgbm"]
+        calibrated = lgb_predicted.assign(pred=np.concatenate([f["calibrated"] for f in lgb_folds]))
         out += [f"## Trained on `{label}`", "", baseline_markdown(reports)]
         for population in ("universe", "candidates"):
             monthly = pd.DataFrame(
                 {
-                    **{f"{b}": baselines[b][population]["monthly"][metric] for b in baselines},
+                    **{b: baselines[b][population]["monthly"][metric] for b in baselines},
                     **{m: r[population]["monthly"][metric] for m, r in reports.items()},
                 }
             )
@@ -209,8 +211,6 @@ def main(features_csv: Path = Path("out/features.csv"), output_md: Path = Path("
             if probability:
                 skill = {m: round(float(reports[m][population]["brier_skill"]), 4) for m in reports}
                 months = {m: int((reports[m][population]["monthly"]["brier_skill"] > 0).sum()) for m in reports}
-                lgb_predicted, lgb_folds = extra["lightgbm"]
-                calibrated = lgb_predicted.assign(pred=np.concatenate([f["calibrated"] for f in lgb_folds]))
                 iso = evaluate(calibrated, probability=True)[population]
                 skill["lightgbm, isotonic"] = round(float(iso["brier_skill"]), 4)
                 months["lightgbm, isotonic"] = int((iso["monthly"]["brier_skill"] > 0).sum())
@@ -231,10 +231,10 @@ def main(features_csv: Path = Path("out/features.csv"), output_md: Path = Path("
                 weights = pd.DataFrame(
                     {
                         "mean": weights.mean(axis=1),
-                        "positive_folds": (sign > 0).sum(axis=1),
                         "minority_folds": (sign.ne(majority, axis=0)).sum(axis=1),
                     }
                 )
+                unstable = list(weights.index[weights["minority_folds"] >= 3])
             else:
                 weights = pd.DataFrame(
                     {
@@ -245,12 +245,10 @@ def main(features_csv: Path = Path("out/features.csv"), output_md: Path = Path("
             weights.index.name = "input"
             out += [*table(weights), ""]
             if model == "logistic":
-                unstable = list(weights.index[weights["minority_folds"] >= 3])
                 out += [f"Unstable inputs (minority sign in 3 or more folds): {len(unstable)}, {unstable}", ""]
             out += ["Calibration (universe, deciles of raw `pred`):", "", *table(calibration(predicted, label)), ""]
             if model == "lightgbm":
-                cal = predicted.assign(pred=np.concatenate([f["calibrated"] for f in folds]))
-                out += ["Calibration after isotonic:", "", *table(calibration(cal, label)), ""]
+                out += ["Calibration after isotonic:", "", *table(calibration(calibrated, label)), ""]
     output_md.write_text("\n".join(out) + "\n", encoding="utf-8")
     log.info(f"models written to {output_md}")
 
