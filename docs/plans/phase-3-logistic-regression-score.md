@@ -17,6 +17,22 @@ Possible outcomes, all useful:
 - **One pooled model for all symbols**, not one per symbol: about 380 rows per symbol (about 75 independent 5-session periods) for 21–35 coefficients (21 inputs, plus the 14 of step 4) would overfit, the cross-sectional label only exists across symbols, and the per-symbol probabilities would not be comparable. Differences between symbols come in as features (size, volatility, later sector), see step 6.
 - **Train on many sessions pooled, retrain monthly, score daily.** Not trained per day: one session has about 90 rows, and its labels are only known 5 sessions later.
 - Label: 1 when the symbol's 5-session forward return beats the cross-sectional **median** of that session, else 0 (balanced classes, market direction removed). Second label, evaluated the same way: `hit_3pct_5` = `close(t+5) ≥ close(t) × 1.03`, Phase 2's definition of a right buy, so the results here compare with Phase 2's deciders.
+- **How `hit_3pct_5` is judged** (review-debt item 3). This label follows the market: in a good week most symbols reach +3%, in a bad week few do. Pooled AUC therefore mixes sessions, and it is not comparable between the two models: logistic on per-session z-scores cannot see the market level, while LightGBM on raw inputs can learn regimes from about 75 periods. Rank IC is cross-sectional, while Phase 2 uses an absolute target. So `hit_3pct_5` is judged on what Phase 2 step 9 measures, with the session as the unit:
+  - **Precision lift:** per session, the hit rate of the top fifth by predicted probability minus that session's base rate (the share of the same population that hit). Report its mean over the test sessions and its t-stat on non-overlapping sessions, the same way as the IC. The top fifth stands in for Phase 2's buy rule, which is still open (Phase 2 step 9). It is cross-sectional, so the absolute level is carried by the Brier skill below.
+  - **Brier skill:** `1 − Brier(model) / Brier(base-rate predictor)` over the test sessions. The base-rate predictor gives every row the share of `hit_3pct_5 = 1` in its training window, on the same population (the candidates' share for the candidates' numbers, 0.257 against 0.238 on production). The same-session share is not known at `t`, so it is never the bar. A plain sign: above 0, and above 0 in most test months.
+  - AUC and rank IC are still reported for `hit_3pct_5`, for reference only.
+  - Baselines 1 and 2 (step 2) are ranks, not probabilities. They are measured on the precision lift only, and the Brier bar is the base-rate predictor.
+- **One primary configuration, a hold-out used once** (review-debt item 7). Steps 3 and 4 try 2 models × 2 labels × up to 3 input sets on about 10 test months, so one would pass by chance.
+  - The primary configuration is L2 logistic, `beat_median`, the 21 base inputs.
+  - Step 5c needs a `hit_3pct_5` model, so that label has its own primary: logistic, the 21 base inputs. Chosen here, change if wrong. The reviewer named one configuration; a second one means a second look at the hold-out.
+  - Every other run is a secondary configuration: LightGBM, the 6 themes, a smaller LightGBM, the inputs of step 4. Each is listed in "Results" with its numbers, so the count of what was tried is known.
+  - A secondary replaces the primary of its label only if it beats it on the walk-forward test months by this rule: a higher non-overlapping t-stat of the label's main metric (IC for `beat_median`, precision lift for `hit_3pct_5`), and better in most months.
+  - **Hold-out:** every session from 2026-09-01 on (about the last 3 months of labelled sessions when this was written, 2026-11-28). The date is fixed and does not slide. Steps 2 to 4 never see it. The walk-forward ends with August 2026, and with the 5-session gap at the boundary: a training row whose `t+5` falls on or after 2026-09-01 is dropped.
+  - With a first training window of about 6 months (from 2025-04-17), that leaves about 10 walk-forward test months (2025-11 to 2026-08). Chosen here, change if wrong.
+  - **One look per label**, so two at most, after step 4. The look scores the kept configuration of that label, trained on every row before the gap. It runs on the production database, because the local one ends 2026-11-09.
+  - A fail on the hold-out is final for that label: no changed configuration is run on it again.
+  - The hold-out pass rule is fixed now. The hold-out has about 60 sessions, about 12 non-overlapping, too few for t ≥ 2. So it needs no t-stat: the label's main metric must be above 0 and beat both baselines, plus, for `hit_3pct_5`, a Brier skill above 0.
+  - Phase 2's TabICL backtest uses the same helper, so it leaves the hold-out alone too. Whether TabICL gets a look at it, and which bar it must pass, is review-debt item 8.
 - Models: L2 logistic regression (scikit-learn; statsmodels only to read the coefficients, its p-values are too optimistic here: rows of one session are correlated and the 5-session labels overlap) and LightGBM (`lightgbm`, binary objective). LightGBM is kept small because the signal is weak and the rows are correlated: shallow trees (`num_leaves` 7–15), a large `min_data_in_leaf` (a few hundred), subsampling of rows and columns, and the number of rounds chosen by early stopping on the inner walk-forward.
 - The panel builder lives in `libs/decision/panel.py` (tested, 95% gate), not in `research/`, because Phase 2's TabICL job calls it every day; `research/` only calls it and writes the CSV.
 - **Two populations, every metric on both** (review-debt item 2): the whole universe (about 90 liquid symbols per session) and Phase 2's candidates, the rows of each session with `score >= MIN_SCORE` (`libs/decision/candidates.py`, imported, not copied). Phase 2 decides only the candidates, so only the second set of numbers compares with its deciders and with TabICL's backtest. Models are trained on the whole universe (more rows) and only evaluated on both. Chosen here, change if wrong: a per-session metric of the candidates (rank IC, top minus bottom fifth) skips a session with fewer than 5 candidates, and the report says how many sessions it skipped.
@@ -74,8 +90,8 @@ Done when the CSV exists, the look-ahead check passes and the README lists the s
 
 ## Step 2. Baselines (the bar to beat)
 
-- [ ] Walk-forward evaluation helper shared with step 3: monthly folds, expanding training window, **5-session gap** between training and test, metrics on the test months only.
-- [ ] Metrics: AUC; rank IC per session (Spearman of prediction vs `fwd_return_5`) with its t-stat computed on **non-overlapping sessions** (every 5th session, averaged over the 5 offsets; the overlapping t-stat inflated TiRex-2's result, see the foundation-model plan); top-fifth minus bottom-fifth return; hit rate, next to the base rate of the same rows (the share of `hit_3pct_5 = 1` or `beat_median = 1` on the test months). The helper reports each metric twice, on the whole universe and on the candidates (`score >= MIN_SCORE`, see "Decisions"), from the same predictions; steps 3 and 4 and Phase 2's TabICL backtest use the same helper, so their numbers come in both forms too.
+- [ ] Walk-forward evaluation helper shared with step 3: monthly folds, expanding training window, **5-session gap** between training and test, metrics on the test months only. It never uses a session of the hold-out (from 2026-09-01, see "Decisions"), neither for training nor for testing. The one look per label is a separate run, made on purpose after step 4.
+- [ ] Metrics: AUC; rank IC per session (Spearman of prediction vs `fwd_return_5`) with its t-stat computed on **non-overlapping sessions** (every 5th session, averaged over the 5 offsets; the overlapping t-stat inflated TiRex-2's result, see the foundation-model plan); top-fifth minus bottom-fifth return; for `hit_3pct_5`, the precision lift and the Brier skill of "Decisions" (per session, against the same session's base rate and the training window's base rate). The helper reports each metric twice, on the whole universe and on the candidates (`score >= MIN_SCORE`, see "Decisions"), from the same predictions; steps 3 and 4 and Phase 2's TabICL backtest use the same helper, so their numbers come in both forms too.
 - [ ] Baseline 1: the current `score`.
 - [ ] Baseline 2: equal-weight mean of the standardised inputs (no learning).
 - [ ] Write the numbers into this file ("Results").
@@ -87,11 +103,16 @@ Both models on the same folds, both labels (`beat_median` first, `hit_3pct_5` se
 - [ ] L2 logistic, `C` chosen by an inner walk-forward on the training window only (never on the test months).
 - [ ] LightGBM with the small settings of "Decisions"; rounds by early stopping on the same inner walk-forward. Raw inputs (trees need no z-score; missing values stay missing, LightGBM handles them).
 - [ ] Same metrics as step 2 for both, plus calibration (bins of predicted probability vs observed share; LightGBM's probabilities are often over-confident, so try isotonic calibration on the inner folds), the logistic coefficients of every fold (sign stability per indicator) and LightGBM's gain importance per fold.
-- [ ] Expectations to judge against: AUC 0.52–0.55 is good for stocks; ≥ 0.60 means a leak, look for it before celebrating. LightGBM much better than logistic on training folds but not on test months = overfitting: shrink it further.
-- [ ] If the coefficients are unstable: group the inputs into the 6 themes (6 features) and rerun both.
+- [ ] Expectations to judge against: AUC 0.52–0.55 is good for stocks; ≥ 0.60 means a leak, look for it before celebrating. LightGBM much better than logistic on training folds but not on test months = overfitting. A smaller LightGBM is then one more secondary configuration (see "Decisions"), listed in "Results".
+- [ ] If the coefficients are unstable: group the inputs into the 6 themes (6 features) and rerun both, as secondary configurations.
 - [ ] Results, the coefficient table and the importance table go into this file.
 
-**Go / no-go** for step 5, **per model and per label** (each label has its own trained models), all three on the test months: AUC ≥ 0.52; non-overlapping IC t-stat ≥ 2; beats both baselines on IC in most months. A pass on `beat_median` says nothing about `hit_3pct_5`: step 5c needs the `hit_3pct_5` model's own pass. If both model types pass for a label, logistic is kept unless LightGBM is clearly better (for example a higher IC in most months).
+**Go / no-go** for step 5, **per label**, on the kept configuration of that label: its primary, unless a secondary replaced it by the rule of "Decisions". It is judged after step 4, first on the walk-forward test months, then once on the hold-out:
+- `beat_median`, on the test months: AUC ≥ 0.52; non-overlapping IC t-stat ≥ 2; beats both baselines on IC in most months.
+- `hit_3pct_5`, on the test months (review-debt item 3): non-overlapping precision-lift t-stat ≥ 2; Brier skill above 0, and above 0 in most months; beats both baselines on precision lift in most months. Phase 2 decides only the candidates, so step 5c counts the candidates' numbers.
+- Then the hold-out, with the pass rule of "Decisions". A fail there is a no-go for that label.
+
+A pass on `beat_median` says nothing about `hit_3pct_5`: step 5c needs the `hit_3pct_5` model's own pass.
 
 ## Step 4. Extra inputs from `vn_stock_prices`
 
@@ -104,7 +125,7 @@ Only stationary, comparable-across-symbols features; never raw prices or raw vol
 - [ ] `max_return_20` (lottery effect), `drawdown_60`
 - [ ] `volume_change_1`
 - [ ] Skip days whose one-day change is beyond ±7% (ex-rights on adjusted prices) when counting limit days.
-- [ ] Rerun step 3 (both models) with 21 + these inputs. Choose which new inputs to keep **inside each training window** (its inner walk-forward), never from the test months: the outer test months then score the whole procedure (selection included) once, and their numbers stay an honest estimate.
+- [ ] Rerun step 3 (both models) with 21 + these inputs, as secondary configurations (see "Decisions"). Choose which new inputs to keep **inside each training window** (its inner walk-forward), never from the test months: the outer test months then score the whole procedure (selection included). The hold-out gives the final estimate.
 
 ## Step 5. Use the result (only after a "go")
 
