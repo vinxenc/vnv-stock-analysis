@@ -1,10 +1,11 @@
 """Phase 3 step 1: write the feature panel to a CSV, print its sanity statistics, run the look-ahead check.
 
 Usage: DATABASE_URL=... uv run python -m research.export_features [output_csv]
-Default: out/features.csv. The panel starts on the 70th stored session (the longest lookback of the 21 inputs) and ends
-on the newest one; the last 5 sessions have no labels. Exit 1 when the look-ahead check finds a difference or has no
-stored ranking to compare with (it then proves nothing): run it against a database whose `vn_stock_rankings` is filled.
-The sessions of EXPLAINED are left out of the check. Exit 1 too when fewer than WARM_UP sessions are stored.
+Default: out/features.csv. The panel starts on the 70th stored session from BACKFILL_START (the longest lookback of the
+21 inputs) and ends on the newest one; the last 5 sessions have no labels. Exit 1 when the look-ahead check finds a
+difference or has no stored ranking to compare with (it then proves nothing): run it against a database whose
+`vn_stock_rankings` is filled. The sessions of EXPLAINED are left out of the check. Exit 1 too when fewer than WARM_UP
+sessions are stored.
 """
 
 import csv
@@ -22,7 +23,10 @@ from libs.logger import LogxideLogger
 from scripts.vn_holiday import off_reason
 
 WARM_UP = 70  # sessions: the most rows any of the 21 inputs needs (#9, #11, #24)
-COLUMNS = ["date", "symbol", "turnover", *panel.INPUTS.values(), "score", *panel.LABELS]
+# The backfill of every symbol starts here. Older bars are only the whole histories `vn_stock_dividend_history`
+# re-stores from 2019 for a symbol going ex-rights (3 symbols on 2026-11-28): a session of those few is no universe.
+BACKFILL_START = dt.date(2025, 1, 2)
+COLUMNS = ["date", "symbol", "turnover", *panel.INPUTS.values(), *panel.EXTRA, "score", *panel.LABELS]
 # Sessions whose differences are explained by a stored bar that changed after the live run (Phase 3 step 1, production
 # run of 2026-11-27): DNSE serves the eve of an ex-date already adjusted after midnight and the sync re-stores it.
 # ponytail: one entry per such eve until the price pipeline stops re-storing them; then this list is only history.
@@ -41,7 +45,7 @@ def share(rows: list[dict], label: str) -> str:
 def main(output_csv: Path = Path("out/features.csv")) -> int:
     engine = connect()
     prices = panel.load_prices(engine)  # read once, for the panel and the check
-    sessions = sorted({row.date for rows in prices.values() for row in rows})
+    sessions = sorted({row.date for rows in prices.values() for row in rows if row.date >= BACKFILL_START})
     if len(sessions) < WARM_UP:
         log.error(f"fewer than {WARM_UP} stored sessions: no panel")
         return 1

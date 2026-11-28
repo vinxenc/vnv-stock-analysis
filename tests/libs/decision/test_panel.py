@@ -9,6 +9,7 @@ from sqlmodel import Session
 from libs.analysis.models import IndicatorStatus
 from libs.analysis.report import build_report
 from libs.constants import HISTORY_SESSIONS
+from libs.db.models import Price
 from libs.decision import panel
 from libs.decision.outcome import fill_outcomes, outcome
 from libs.indicators import TalibIndicators
@@ -56,6 +57,72 @@ def at(rows: list[dict], day: dt.date) -> dict[str, dict]:
 def test_the_panel_has_21_inputs() -> None:
     assert len(panel.INPUTS) == 21
     assert "close_vs_sma200" not in panel.INPUTS.values() and "close_vs_250_high" not in panel.INPUTS.values()
+
+
+def bars(closes: list[float], volumes: list[int] | None = None, opens: list[float] | None = None) -> list[Price]:
+    """Daily bars from FIRST: high 2% above the higher of open and close, low 1% below the lower."""
+    volumes = volumes or [1_000] * len(closes)
+    opens = opens or closes
+    return [
+        Price.model_validate(
+            {
+                "symbol": "X",
+                "date": FIRST + dt.timedelta(days=n),
+                "source": "test",
+                "open": o,
+                "high": max(o, c) * 1.02,
+                "low": min(o, c) * 0.99,
+                "close": c,
+                "volume": v,
+            }
+        )
+        for n, (o, c, v) in enumerate(zip(opens, closes, volumes, strict=True))
+    ]
+
+
+def test_the_extra_inputs_on_hand_made_bars() -> None:
+    # 60 bars: flat at 10, then +6.9% (a ceiling close after tick rounding), +6.4% (not one), -6.6% (a floor close)
+    closes = [10.0] * 56 + [10.69, 11.37416, 10.623465, 10.5]
+    volumes = [1_000] * 59 + [2_000]
+    opens = [*closes[:-1], 10.7]
+    row = panel.extra_inputs(bars(closes, volumes, opens))
+    assert set(row) == set(panel.EXTRA)
+    assert row["return_1"] == pytest.approx(10.5 / 10.623465 - 1)
+    assert row["return_5"] == pytest.approx(10.5 / 10.0 - 1)
+    assert row["gap"] == pytest.approx(10.7 / 10.623465 - 1)
+    assert row["dist_to_ceiling"] == pytest.approx(10.623465 * 1.07 / 10.5 - 1)
+    assert row["range_pct"] == pytest.approx((10.7 * 1.02 - 10.5 * 0.99) / 10.5)
+    assert row["upper_shadow"] == pytest.approx((10.7 * 1.02 - 10.7) / 10.5)
+    assert row["lower_shadow"] == pytest.approx((10.5 - 10.5 * 0.99) / 10.5)
+    assert (row["limit_up_days"], row["limit_down_days"]) == (1, 1)
+    assert row["max_return_20"] == pytest.approx(0.069)
+    assert row["drawdown_60"] == pytest.approx(10.5 / 11.37416 - 1)
+    assert row["volume_change_1"] == pytest.approx(math.log(2))
+    turnovers = [c * v for c, v in zip(closes[-20:], volumes[-20:], strict=True)]
+    assert row["log_turnover"] == pytest.approx(math.log(sum(turnovers) / 20))
+    changes = [b / a - 1 for a, b in zip(closes[-21:-1], closes[-20:], strict=True)]
+    amihud = sum(abs(r) / t for r, t in zip(changes, turnovers, strict=True)) / 20
+    assert row["amihud"] == pytest.approx(math.log(amihud))
+
+
+def test_a_day_beyond_max_move_is_an_ex_rights_date() -> None:
+    # t itself 10% down: the one-day inputs are empty; inside the window: left out of the counts and the maximum
+    on_t = panel.extra_inputs(bars([10.0] * 30 + [9.0]))
+    assert on_t["return_1"] is None and on_t["gap"] is None and on_t["dist_to_ceiling"] is None
+    assert on_t["limit_down_days"] == 0 and on_t["max_return_20"] == 0.0
+    inside = panel.extra_inputs(bars([10.0] * 20 + [11.0] * 11))  # +10%, then flat
+    assert inside["return_1"] == 0.0 and inside["limit_up_days"] == 0 and inside["max_return_20"] == 0.0
+
+
+def test_the_extra_inputs_need_their_bars() -> None:
+    one = panel.extra_inputs(bars([10.0]))
+    assert one["range_pct"] is not None and one["log_turnover"] is not None
+    assert all(one[name] is None for name in ("return_1", "gap", "volume_change_1", "return_5", "drawdown_60"))
+    short = panel.extra_inputs(bars([10.0] * 20))  # 19 changes: no 20-session count yet
+    assert short["return_5"] == 0.0 and short["limit_up_days"] is None and short["amihud"] is None
+    assert panel.extra_inputs(bars([10.0] * 21))["amihud"] is None  # no move at all: no illiquidity to log
+    halted = panel.extra_inputs(bars([10.0] * 3, [1_000, 0, 1_000]))
+    assert halted["volume_change_1"] is None
 
 
 def test_a_row_equals_the_live_run(engine: Engine) -> None:

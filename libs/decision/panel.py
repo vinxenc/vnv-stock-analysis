@@ -5,7 +5,8 @@ previous stored session's symbols with a bar on t): the screen's universe (`MIN_
 rows, a traded bar on t), then the scoring of `libs/analysis` on each symbol's last `HISTORY_SESSIONS` bars up to t,
 the same window `vn_stock_get_history` gives the live run (RSI and PPO are recursive, so a longer window would change
 them).
-One row per (date, symbol): the 21 raw inputs, the 0-100 `score` and the forward labels of `libs/decision/outcome.py`.
+One row per (date, symbol): the 21 raw inputs, step 4's 14 inputs from the bars (`EXTRA`), the 0-100 `score` and the
+forward labels of `libs/decision/outcome.py`.
 Main dependencies only (CI's test job installs only `dev`): plain dicts, no pandas.
 """
 
@@ -20,15 +21,36 @@ from sqlmodel import Session, select
 
 from libs.analysis import scoring
 from libs.analysis.features import Candles, Detection, mean
+from libs.analysis.gates import CEILING, CEILING_TOLERANCE
 from libs.analysis.models import IndicatorResult
 from libs.analysis.report import symbol_result
 from libs.constants import HISTORY_SESSIONS, MIN_COVERAGE, MIN_TURNOVER, TURNOVER_SESSIONS
 from libs.db.models import Price, Ranking
-from libs.decision.outcome import outcome
+from libs.decision.outcome import MAX_MOVE, outcome
 from libs.indicators import Indicators
 
 DROPPED = (5, 17, 19)  # Option B: #5 and #17 need 200 and 250 rows; #19 is #1's raw value again
 INPUTS = {indicator.id: indicator.raw_name for indicator in scoring.INDICATORS if indicator.id not in DROPPED}
+# Step 4's inputs, straight from the bars (definitions in the plan, step 4); INPUTS stays the 21 of step 3
+EXTRA = (
+    "return_1",
+    "return_5",
+    "log_turnover",
+    "amihud",
+    "limit_up_days",
+    "limit_down_days",
+    "dist_to_ceiling",
+    "gap",
+    "range_pct",
+    "upper_shadow",
+    "lower_shadow",
+    "max_return_20",
+    "drawdown_60",
+    "volume_change_1",
+)
+EXTRA_SESSIONS, DRAWDOWN_SESSIONS = 20, 60
+UP_LIMIT = (1 + CEILING) * (1 - CEILING_TOLERANCE) - 1  # a ceiling close, as `gates.flags` tells one
+DOWN_LIMIT = (1 - CEILING) * (1 + CEILING_TOLERANCE) - 1
 LABELS = ("fwd_return_5", "excess_return_5", "beat_median", "hit_3pct_5")
 UP_DAY_SINCE = "up_day"  # #12 stores this key since #33 (2026-11-16); older rows hold the gated value instead
 REL_TOL, ABS_TOL = 1e-6, 1e-9  # the windows are the same, so only float noise is allowed
@@ -78,6 +100,43 @@ def _input(raw: scoring.Raw, name: str) -> float | None:
     return float(raw.details.get(name, raw.strength)) if isinstance(raw, Detection) else raw  # type: ignore[arg-type]
 
 
+def extra_inputs(bars: list[Price]) -> dict[str, float | None]:
+    """Step 4's 14 inputs on the window up to t (`bars[-1]` is t). A day whose one-day change is beyond MAX_MOVE is an
+    ex-rights date on adjusted prices: skipped in the 20-session counts, and the one-day inputs of such a t are None."""
+    out: dict[str, float | None] = dict.fromkeys(EXTRA)
+    last = bars[-1]
+    out["log_turnover"] = math.log(mean([bar.close * bar.volume for bar in bars[-TURNOVER_SESSIONS:]]))
+    out["range_pct"] = (last.high - last.low) / last.close
+    out["upper_shadow"] = (last.high - max(last.open, last.close)) / last.close
+    out["lower_shadow"] = (min(last.open, last.close) - last.low) / last.close
+    if len(bars) >= DRAWDOWN_SESSIONS:
+        out["drawdown_60"] = last.close / max(bar.close for bar in bars[-DRAWDOWN_SESSIONS:]) - 1
+    if len(bars) < 2:
+        return out
+    previous = bars[-2]
+    changes = [bar.close / before.close - 1 for before, bar in zip(bars, bars[1:], strict=False)]
+    if abs(changes[-1]) <= MAX_MOVE:
+        out["return_1"] = changes[-1]
+        out["gap"] = last.open / previous.close - 1
+        out["dist_to_ceiling"] = previous.close * (1 + CEILING) / last.close - 1
+    if previous.volume > 0:
+        out["volume_change_1"] = math.log(last.volume / previous.volume)
+    if len(bars) > 5:
+        out["return_5"] = last.close / bars[-6].close - 1
+    if len(changes) >= EXTRA_SESSIONS:
+        recent = changes[-EXTRA_SESSIONS:]
+        kept = [change for change in recent if abs(change) <= MAX_MOVE]
+        out["limit_up_days"] = sum(change >= UP_LIMIT for change in kept)
+        out["limit_down_days"] = sum(change <= DOWN_LIMIT for change in kept)
+        out["max_return_20"] = max(kept, default=None)
+        days = bars[-EXTRA_SESSIONS:]
+        pairs = zip(recent, days, strict=True)
+        ratios = [abs(change) / (bar.close * bar.volume) for change, bar in pairs if bar.volume]
+        illiquidity = mean(ratios) if ratios else 0.0
+        out["amihud"] = math.log(illiquidity) if illiquidity > 0 else None
+    return out
+
+
 def build_panel(
     prices: Prices, start: dt.date, end: dt.date, is_working_day: Callable[[dt.date], bool], indicators: Indicators
 ) -> list[dict]:
@@ -104,6 +163,7 @@ def build_panel(
                     "symbol": symbol,
                     "turnover": turnover,
                     **{name: _input(raws[id_], name) for id_, name in INPUTS.items()},
+                    **extra_inputs(_window(prices[symbol], dates[symbol], t)),
                     "score": score,
                     "fwd_return_5": None if labelled is None else labelled[0],
                     "hit_3pct_5": None if labelled is None else int(labelled[1]),
