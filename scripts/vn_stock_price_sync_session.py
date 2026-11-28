@@ -5,7 +5,7 @@ a run after a failed or missed one catches every session up at once. An empty hi
 session.
 
 The workflow passes the span to the next jobs (`SESSIONS`, `first..last`): the dividend history and the retrieval;
-the store records the newest session it stored in the history with the prices. A run that fails before the store
+the store records every session it stored in the history with the prices. A run that fails before the store
 leaves the sessions due. The span is fixed here, never in a later job: a job delayed past the next close must not take
 a session that is still trading.
 

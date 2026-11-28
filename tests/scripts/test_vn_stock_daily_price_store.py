@@ -68,12 +68,15 @@ def test_main_records_the_session_with_the_prices(tmp_path: Path, engine: Engine
         assert [str(day) for day in session.exec(select(PriceSyncHistory.date))] == ["2026-10-23"]
 
 
-def test_main_several_sessions_record_the_newest(tmp_path: Path, engine: Engine) -> None:
+def test_main_several_sessions_record_each_one(tmp_path: Path, engine: Engine) -> None:
     rows = [row("AAA", date="2026-10-26"), row("AAA"), row("BBB", date="2026-10-26")]
     assert main(write_json(tmp_path / "p.json", *rows), engine) == 0
     assert len(stored(engine)) == 3
     with Session(engine) as session:
-        assert [str(day) for day in session.exec(select(PriceSyncHistory.date))] == ["2026-10-26"]
+        assert [str(day) for day in session.exec(select(PriceSyncHistory.date).order_by(PriceSyncHistory.date))] == [
+            "2026-10-23",
+            "2026-10-26",
+        ]
 
 
 def test_a_large_upsert_is_chunked(engine: Engine) -> None:
