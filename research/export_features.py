@@ -14,8 +14,6 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean, median
 
-from sqlalchemy import text
-
 from libs.db import connect
 from libs.decision import panel
 from libs.decision.candidates import MIN_SCORE
@@ -42,21 +40,14 @@ def share(rows: list[dict], label: str) -> str:
 
 def main(output_csv: Path = Path("out/features.csv")) -> int:
     engine = connect()
-    with engine.connect() as connection:
-        found = connection.execute(
-            text(
-                "SELECT date, (SELECT max(date) FROM vn_stock_prices) FROM (SELECT DISTINCT date FROM vn_stock_prices)"
-                " AS d ORDER BY date OFFSET :skip LIMIT 1"
-            ),
-            {"skip": WARM_UP - 1},
-        ).one_or_none()
-    if found is None:
+    prices = panel.load_prices(engine)  # read once, for the panel and the check
+    sessions = sorted({row.date for rows in prices.values() for row in rows})
+    if len(sessions) < WARM_UP:
         log.error(f"fewer than {WARM_UP} stored sessions: no panel")
         return 1
-    start, end = found
+    start, end = sessions[WARM_UP - 1], sessions[-1]
     indicators = TalibIndicators()
-    prices = panel.load_prices(engine)  # read once, for the panel and the check
-    rows = panel.build_panel(engine, start, end, lambda day: off_reason(day) is None, indicators, prices)
+    rows = panel.build_panel(prices, start, end, lambda day: off_reason(day) is None, indicators)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with output_csv.open("w", encoding="utf-8", newline="") as file:
         writer = csv.DictWriter(file, COLUMNS)
@@ -72,14 +63,8 @@ def main(output_csv: Path = Path("out/features.csv")) -> int:
 
     candidates = [row for row in rows if is_candidate(row)]
     per_session = [sum(map(is_candidate, session)) for session in by_session.values()]
-    beat = [
-        mean(r["beat_median"] for r in s if r["beat_median"] is not None)
-        for s in by_session.values()
-        if any(r["beat_median"] is not None for r in s)
-    ]
     log.info(f"{output_csv}: {len(rows)} rows, {len(by_session)} sessions ({start} to {end})")
     # a panel of 70 to 74 sessions has no label yet, one without a liquid symbol no session: log, keep the check
-    log.info(f"beat_median share per session: {f'min {min(beat):.3f}, max {max(beat):.3f}' if beat else 'none'}")
     log.info(
         f"hit_3pct_5 share: whole universe {share(rows, 'hit_3pct_5')}, candidates {share(candidates, 'hit_3pct_5')}"
     )

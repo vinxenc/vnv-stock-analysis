@@ -23,12 +23,6 @@ dev = [
     "alembic>=1.20.1",
     "lefthook>=2.2.4",
 ]
-research = [
-    "lightgbm>=4.7.0",
-    "pandas>=3.1.1",
-    "scikit-learn>=1.9.1",
-    "statsmodels>=0.15.0",
-]
 
 [tool.uv]
 package = false

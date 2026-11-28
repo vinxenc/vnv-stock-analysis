@@ -6,7 +6,7 @@ rows, a traded bar on t), then the scoring of `libs/analysis` on each symbol's l
 the same window `vn_stock_get_history` gives the live run (RSI and PPO are recursive, so a longer window would change
 them).
 One row per (date, symbol): the 21 raw inputs, the 0-100 `score` and the forward labels of `libs/decision/outcome.py`.
-Main dependencies only (CI tests it without the `research` group): plain dicts, no pandas.
+Main dependencies only (CI's test job installs only `dev`): plain dicts, no pandas.
 """
 
 import datetime as dt
@@ -79,30 +79,21 @@ def _input(raw: scoring.Raw, name: str) -> float | None:
 
 
 def build_panel(
-    engine: Engine,
-    start: dt.date,
-    end: dt.date,
-    is_working_day: Callable[[dt.date], bool],
-    indicators: Indicators,
-    prices: Prices | None = None,
+    prices: Prices, start: dt.date, end: dt.date, is_working_day: Callable[[dt.date], bool], indicators: Indicators
 ) -> list[dict]:
     """One row per (date, symbol) of the universe, for every stored session in [start, end] that `screen` would accept
     (a working day, not a partial sync). A cell is None when it cannot be computed; the labels are None until t+5 is
-    stored (and wherever `outcome` leaves them empty). A skipped session still counts in t+5, as in `_FILL`."""
-    prices = prices if prices is not None else load_prices(engine)
+    stored (and wherever `outcome` leaves them empty). A skipped session still counts in t+5, as in `_FILL`.
+    `prices`: what `load_prices` returned."""
     dates = {symbol: [row.date for row in rows] for symbol, rows in prices.items()}
     closes = {symbol: {row.date: row.close for row in rows} for symbol, rows in prices.items()}
     sessions = sorted({day for days in dates.values() for day in days})
-    on: dict[dt.date, set[str]] = {}  # session -> symbols with a bar
-    for symbol, days in dates.items():
-        for day in days:
-            on.setdefault(day, set()).add(symbol)
     panel = []
     for index, t in enumerate(sessions):
         if not start <= t <= end or not is_working_day(t):
             continue
-        before = on[sessions[index - 1]] if index else set()
-        if len(on[t] & before) < MIN_COVERAGE * len(before):  # a partial sync, which `screen` refuses
+        before = [bars for bars in closes.values() if index and sessions[index - 1] in bars]
+        if sum(t in bars for bars in before) < MIN_COVERAGE * len(before):  # a partial sync, which `screen` refuses
             continue
         rows = []
         for symbol, (raws, _, turnover, score) in replay(prices, dates, t, indicators).items():
@@ -150,7 +141,7 @@ def _same(stored: dict, expected: dict) -> bool:
 
 
 def lookahead_check(
-    engine: Engine, indicators: Indicators, prices: Prices | None = None, skip: Collection[dt.date] = ()
+    engine: Engine, indicators: Indicators, prices: Prices, skip: Collection[dt.date] = ()
 ) -> tuple[int, list[str]]:
     """Replay every session of `vn_stock_rankings` and compare each stored indicator's `raw` with the replayed one.
     Returns (sessions compared, mismatches as readable lines). Zero sessions compared proves nothing. `prices`: what
@@ -158,7 +149,6 @@ def lookahead_check(
     bar changed after the live run), left out of the comparison and of the count."""
     with Session(engine) as session:
         stored = session.exec(select(Ranking.date, Ranking.symbol, Ranking.indicators).order_by(Ranking.date)).all()
-    prices = prices if prices is not None else load_prices(engine)
     dates = {symbol: [row.date for row in rows] for symbol, rows in prices.items()}
     mismatches: list[str] = []
     by_session: dict[dt.date, list[tuple[str, list[dict]]]] = {}

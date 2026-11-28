@@ -1,5 +1,6 @@
 import datetime as dt
 import math
+from collections.abc import Callable
 
 import pytest
 from sqlalchemy import Engine, text
@@ -42,8 +43,10 @@ def seed(engine: Engine, symbol: str, count: int, volume: int = 3_000_000, phase
     return [row["date"] for row in rows]
 
 
-def build(engine: Engine, start: dt.date = FIRST, end: dt.date = dt.date(2030, 1, 1)) -> list[dict]:
-    return panel.build_panel(engine, start, end, every_day, ENGINE)
+def build(
+    engine: Engine, start: dt.date = FIRST, end: dt.date = dt.date(2030, 1, 1), working: Callable = every_day
+) -> list[dict]:
+    return panel.build_panel(panel.load_prices(engine), start, end, working, ENGINE)
 
 
 def at(rows: list[dict], day: dt.date) -> dict[str, dict]:
@@ -132,7 +135,7 @@ def test_a_session_the_screen_refuses_is_skipped(engine: Engine) -> None:
     seed(engine, "CCC", 30, phase=2.0)
     with engine.begin() as connection:  # a partial sync on day 20: 1 of the 3 symbols
         connection.execute(text("DELETE FROM vn_stock_prices WHERE symbol <> 'AAA' AND date = :d"), {"d": days[20]})
-    kept = {row["date"] for row in panel.build_panel(engine, FIRST, days[-1], lambda day: day != days[25], ENGINE)}
+    kept = {row["date"] for row in build(engine, working=lambda day: day != days[25])}
     assert days[20] not in kept and days[25] not in kept  # the partial sync, and a day off
     assert {days[19], days[21], days[24], days[26]} <= kept
 
@@ -213,20 +216,24 @@ def test_the_python_label_equals_the_sql_one(
         assert python == (pytest.approx(stored.return_5), stored.hit)
 
 
+def check(engine: Engine, skip: tuple[dt.date, ...] = ()) -> tuple[int, list[str]]:
+    return panel.lookahead_check(engine, ENGINE, panel.load_prices(engine), skip)
+
+
 def test_the_lookahead_check(engine: Engine) -> None:
     days = seed(engine, "AAA", 300)
     seed(engine, "BBB", 300, phase=1.0)
-    assert panel.lookahead_check(engine, ENGINE) == (0, [])  # nothing stored: nothing proven
+    assert check(engine) == (0, [])  # nothing stored: nothing proven
     for t in days[-3:]:
         with Session(engine) as session:
             history = {symbol: get_history(session, symbol, t) for symbol in screen(engine, t)}
         store(build_report(history, dict.fromkeys(history, dt.date.min), ENGINE), engine)
-    assert panel.lookahead_check(engine, ENGINE) == (3, [])
+    assert check(engine) == (3, [])
 
     def edit(sql: str) -> list[str]:
         with engine.begin() as connection:
             connection.execute(text(sql), {"t": days[-1]})
-        return panel.lookahead_check(engine, ENGINE)[1]
+        return check(engine)[1]
 
     # #12 (the 12th element) in its form before #33: the gated value, no `up_day`
     old_form = (
@@ -240,7 +247,7 @@ def test_the_lookahead_check(engine: Engine) -> None:
         " WHERE date = :t AND symbol = 'AAA'"
     )
     assert len(wrong) == 1 and "AAA #12" in wrong[0]
-    assert panel.lookahead_check(engine, ENGINE, skip={days[-1]}) == (2, [])  # an explained session is left out
+    assert check(engine, (days[-1],)) == (2, [])  # an explained session is left out
     extra = edit(
         "UPDATE vn_stock_rankings SET indicators = jsonb_set(indicators, '{0,raw,extra}', '\"x\"')"
         " WHERE date = :t AND symbol = 'BBB'"
