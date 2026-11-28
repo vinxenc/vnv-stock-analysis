@@ -23,7 +23,7 @@ from sklearn.metrics import log_loss
 from libs.logger import LogxideLogger
 from research.baselines import BASELINES, INPUTS
 from research.baselines import markdown as baseline_markdown
-from research.walk_forward import auc, evaluate, load, split, walk_forward, zscore
+from research.walk_forward import HOLDOUT_START, auc, evaluate, load, split, walk_forward, zscore
 
 C_GRID = (0.001, 0.01, 0.1, 1.0, 10.0)
 INNER_MONTHS = 3  # the last 3 calendar months of each training window are its inner test months
@@ -115,7 +115,7 @@ def lightgbm(label: str, folds: list[Fold]) -> Callable[[pd.DataFrame, pd.DataFr
                 "rounds": n,
                 "train_auc": auc(pd.Series(booster.predict(train[INPUTS]), index=train.index), train[label]),
                 "calibrated": iso.predict(raw),
-                **dict(zip(INPUTS, gain / gain.sum(), strict=True)),
+                **dict(zip(INPUTS, gain / (gain.sum() or 1), strict=True)),  # a booster without a split has no gain
             }
         )
         return pd.Series(raw, index=test.index)
@@ -226,12 +226,10 @@ def main(features_csv: Path = Path("out/features.csv"), output_md: Path = Path("
             out += [f"Mean train AUC {train_auc:.4f}, test {test_auc:.4f}, gap {train_auc - test_auc:.4f}", ""]
             weights = fold_frame[INPUTS].T
             if model == "logistic":
-                sign = np.sign(weights)
-                majority = np.sign(sign.sum(axis=1)).replace(0, 1)
                 weights = pd.DataFrame(
                     {
                         "mean": weights.mean(axis=1),
-                        "minority_folds": (sign.ne(majority, axis=0)).sum(axis=1),
+                        "minority_folds": np.minimum((weights > 0).sum(axis=1), (weights < 0).sum(axis=1)),
                     }
                 )
                 unstable = list(weights.index[weights["minority_folds"] >= 3])
@@ -259,7 +257,8 @@ def check(features_csv: Path = Path("out/features.csv")) -> None:
     shuffled = df.copy()
     labels = ["fwd_return_5", "excess_return_5", "beat_median", "hit_3pct_5"]
     shuffled[labels] = df.groupby("date")[labels].transform(lambda s: s.sample(frac=1, random_state=rng).to_numpy())
-    planted = df.assign(rsi14=df["excess_return_5"] + rng.normal(0, df["excess_return_5"].std(), len(df)))
+    scale = split(df, HOLDOUT_START, HOLDOUT_START)[0]["excess_return_5"].std()  # no label that reads the hold-out
+    planted = df.assign(rsi14=df["excess_return_5"] + rng.normal(0, scale, len(df)))
     rows = evaluate(walk_forward(df, BASELINES["equal_weight"]))["universe"]["rows"]
     for model in MODELS:
         noise = evaluate(run(shuffled, model, "beat_median")[0])["universe"]
