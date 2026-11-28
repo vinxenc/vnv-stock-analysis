@@ -138,7 +138,7 @@ def calibration(predicted: pd.DataFrame, label: str) -> pd.DataFrame:
 def table(frame: pd.DataFrame, digits: int = 4) -> list[str]:
     lines = ["| " + " | ".join([frame.index.name or "", *map(str, frame.columns)]) + " |"]
     lines.append("|---" * (len(frame.columns) + 1) + "|")
-    for key, row in frame.iterrows():
+    for key, row in frame.astype(object).iterrows():
         lines.append(
             f"| {key} | " + " | ".join(f"{v:.{digits}f}" if isinstance(v, float) else str(v) for v in row) + " |"
         )
@@ -168,13 +168,17 @@ def main(features_csv: Path = Path("out/features.csv"), output_md: Path = Path("
             best_baseline = monthly[list(baselines)].max(axis=1)
             beats = {m: f"{int((monthly[m] > best_baseline).sum())} of {len(monthly)}" for m in reports}
             out += [f"Months above both baselines on {metric}, {population}: {beats}", ""]
+            lo, gb = f"logistic[{label}]", f"lightgbm[{label}]"
+            t = {m: round(reports[m][population][f"{metric}_t"], 2) for m in (gb, lo)}
+            better = int((monthly[gb] > monthly[lo]).sum())
+            out += [f"LightGBM vs logistic on {metric}, {population}: t {t}, better in {better} of {len(monthly)}", ""]
             if probability:
-                skill = {m: reports[m][population]["brier_skill"] for m in reports}
+                skill = {m: round(float(reports[m][population]["brier_skill"]), 4) for m in reports}
                 months = {m: int((reports[m][population]["monthly"]["brier_skill"] > 0).sum()) for m in reports}
                 lgb_predicted, lgb_folds = extra["lightgbm"]
                 calibrated = lgb_predicted.assign(pred=np.concatenate([f["calibrated"] for f in lgb_folds]))
                 iso = evaluate(calibrated, probability=True)[population]
-                skill["lightgbm, isotonic"] = iso["brier_skill"]
+                skill["lightgbm, isotonic"] = round(float(iso["brier_skill"]), 4)
                 months["lightgbm, isotonic"] = int((iso["monthly"]["brier_skill"] > 0).sum())
                 out += [f"Brier skill, {population}: {skill}; months above 0: {months}", ""]
         for model, (predicted, folds) in extra.items():
@@ -185,6 +189,8 @@ def main(features_csv: Path = Path("out/features.csv"), output_md: Path = Path("
             fold_frame.index.name = "month"
             summary = fold_frame.drop(columns=INPUTS).assign(test_auc=test_auc)
             out += [f"### {model} on `{label}`: per fold", "", *table(summary), ""]
+            train_auc, test_auc = summary["train_auc"].mean(), summary["test_auc"].mean()
+            out += [f"Mean train AUC {train_auc:.4f}, test {test_auc:.4f}, gap {train_auc - test_auc:.4f}", ""]
             weights = fold_frame[INPUTS].T
             if model == "logistic":
                 sign = np.sign(weights)
@@ -205,6 +211,9 @@ def main(features_csv: Path = Path("out/features.csv"), output_md: Path = Path("
                 )
             weights.index.name = "input"
             out += [*table(weights), ""]
+            if model == "logistic":
+                unstable = list(weights.index[weights["minority_folds"] >= 3])
+                out += [f"Unstable inputs (minority sign in 3 or more folds): {len(unstable)}, {unstable}", ""]
             out += ["Calibration (universe, deciles of raw `pred`):", "", *table(calibration(predicted, label)), ""]
             if model == "lightgbm":
                 cal = predicted.assign(pred=np.concatenate([f["calibrated"] for f in folds]))
