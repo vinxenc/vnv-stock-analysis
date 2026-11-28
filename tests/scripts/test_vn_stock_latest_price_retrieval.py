@@ -246,14 +246,16 @@ def test_a_working_day_without_any_bar_is_passed_over(tmp_path: Path) -> None:
     assert any("only 0 of 1 symbols have a bar on 2026-12-01 (minimum 90%): dropped" in m for _, m in log.records)
 
 
-def test_a_session_with_too_few_bars_before_a_full_one_is_dropped(tmp_path: Path) -> None:
-    """No source has the day: waiting for it would block the sync for good."""
+def test_a_trading_day_with_too_few_bars_before_a_full_one_is_stored_as_it_is(tmp_path: Path) -> None:
+    """Every source was asked for the day: a later run would get the same answer, and dropping it would block the
+    screen on a day that traded."""
     out, log = tmp_path / "out.json", FakeLogger()
     source = Range("A", sparse=(dt.date(2026, 12, 1),))  # 1 of 3 symbols on 12-01
     assert main(write_csv(tmp_path / "s.csv", "AAA", "BBB", "CCC"), out, [source], sleep=lambda _: None, log=log,
                 sessions=(dt.date(2026, 11, 30), dt.date(2026, 12, 2))) == 0  # fmt: skip
-    assert {row["date"] for row in json.loads(out.read_text(encoding="utf-8"))} == {"2026-11-30", "2026-12-02"}
-    assert any("2026-12-01 (minimum 90%): dropped" in message for _, message in log.records)
+    rows = json.loads(out.read_text(encoding="utf-8"))
+    assert [row["symbol"] for row in rows if row["date"] == "2026-12-01"] == ["AAA"] and len(rows) == 7
+    assert any("2026-12-01 (minimum 90%): stored as the sources have it" in message for _, message in log.records)
 
 
 def test_a_newest_session_with_too_few_bars_stays_due(tmp_path: Path) -> None:
@@ -279,14 +281,30 @@ def test_a_hole_of_the_first_source_is_filled_from_the_next_one(tmp_path: Path) 
     assert len(rows) == 6 and second.calls == ["AAA", "BBB"]
 
 
-def test_asking_again_stops_once_the_day_cannot_pass(tmp_path: Path) -> None:
-    """A closure no calendar knows: 20 symbols, the day fails once 3 of them (over 10%) come back empty."""
+def test_a_day_no_source_has_any_bar_of_is_dropped_after_asking_every_symbol(tmp_path: Path) -> None:
+    """A closure no calendar knows: only every symbol coming back empty from every source confirms it."""
     out, codes = tmp_path / "out.json", [f"S{i:02d}" for i in range(20)]
     first, second = Range("A", missing=(dt.date(2026, 12, 1),)), Range("B", missing=(dt.date(2026, 12, 1),))
     assert main(write_csv(tmp_path / "s.csv", *codes), out, [first, second], sleep=lambda _: None,
                 sessions=(dt.date(2026, 11, 30), dt.date(2026, 12, 2))) == 0  # fmt: skip
     assert {row["date"] for row in json.loads(out.read_text(encoding="utf-8"))} == {"2026-11-30", "2026-12-02"}
-    assert len(first.calls) == 20 + 3 and len(second.calls) == 3
+    assert len(first.calls) == 20 + 20 and len(second.calls) == 20
+
+
+def test_the_first_symbols_without_a_bar_do_not_decide_the_day(tmp_path: Path) -> None:
+    """A lacks 12-01 for everyone, B for the first 3 only: the 17 others are still asked, and the day is kept."""
+
+    class Partial(Range):
+        def get_history(self, symbol: str, start: dt.date, end: dt.date) -> list[Price]:
+            bars = super().get_history(symbol, start, end)
+            return [bar for bar in bars if not (bar.date == dt.date(2026, 12, 1) and symbol < "S03")]
+
+    out, codes = tmp_path / "out.json", [f"S{i:02d}" for i in range(20)]
+    first, second = Range("A", missing=(dt.date(2026, 12, 1),)), Partial("B")
+    assert main(write_csv(tmp_path / "s.csv", *codes), out, [first, second], sleep=lambda _: None,
+                sessions=(dt.date(2026, 11, 30), dt.date(2026, 12, 2))) == 0  # fmt: skip
+    rows = json.loads(out.read_text(encoding="utf-8"))
+    assert sum(row["date"] == "2026-12-01" for row in rows) == 17
 
 
 def test_a_source_failing_while_asking_again_keeps_the_day_due(tmp_path: Path) -> None:
