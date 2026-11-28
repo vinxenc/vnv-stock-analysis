@@ -5,11 +5,11 @@ import datetime as dt
 from libs.analysis import gates, scoring
 from libs.analysis.features import Candles, mean
 from libs.analysis.models import AnalysisReport, IndicatorResult, SymbolResult, Theme
+from libs.constants import TURNOVER_SESSIONS
 from libs.db.models import Price
 from libs.indicators import Indicators
 
 History = dict[str, list[Price]]  # symbol -> rows ascending by date, the last row being the session analysed
-TURNOVER_SESSIONS = 20  # the ranking tie-break, same average as the liquidity screen
 
 
 def symbol_result(

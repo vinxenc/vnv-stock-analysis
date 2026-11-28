@@ -3,10 +3,16 @@
 `t+HORIZON` is the HORIZON-th market session after `t`: the HORIZON-th distinct date after `t` in `vn_stock_prices`, all
 symbols. `hit` is set for every decision, buy or skip: true when `close(t+HORIZON) >= close(t) * (1 + TARGET)`, i.e. the
 price reached the target, not "the decision was right".
+
+The label has two forms that must change together: `_FILL` (SQL, the decisions) and `outcome` (Python, the feature panel
+of Phase 3, whose 34,000 rows the SQL's per-row subqueries would not scale to). `tests/libs/decision/test_panel.py`
+checks that both give the same answer on every rule.
 """
 
 import datetime as dt
 from collections.abc import Callable
+from decimal import Decimal
+from itertools import pairwise
 
 from sqlalchemy import Connection, text
 
@@ -85,3 +91,29 @@ def fill_outcomes(connection: Connection, is_working_day: Callable[[dt.date], bo
     }
     filled, due = connection.execute(_FILL, params).one()
     return filled, due - filled
+
+
+def _numeric(value: float) -> Decimal:
+    """A float8 as Postgres casts it to numeric: 15 significant digits (DBL_DIG)."""
+    return Decimal(format(value, ".15g"))
+
+
+def outcome(
+    sessions: list[dt.date], index: int, closes: dict[dt.date, float], is_working_day: Callable[[dt.date], bool]
+) -> tuple[float, bool] | None:
+    """`(return_5, hit)` of one symbol decided on `sessions[index]`, or None where `_FILL` leaves the row empty.
+
+    `sessions` is every distinct date of `vn_stock_prices` (all symbols), ascending; `closes` the symbol's closes.
+    Same rules as `_FILL`: a bar on t and on each of the HORIZON sessions after it, no one-day change beyond MAX_MOVE
+    (in float, as the SQL), HORIZON working days in (t, t+HORIZON]; the return in numeric.
+    """
+    window = sessions[index : index + HORIZON + 1]
+    if len(window) <= HORIZON or any(day not in closes for day in window):
+        return None
+    if any(abs(closes[after] / closes[before] - 1) > MAX_MOVE for before, after in pairwise(window)):
+        return None
+    start, end = window[0], window[-1]
+    if sum(is_working_day(start + dt.timedelta(days=n)) for n in range(1, (end - start).days + 1)) != HORIZON:
+        return None
+    return_5 = _numeric(closes[end]) / _numeric(closes[start]) - 1
+    return float(return_5), return_5 >= Decimal(str(TARGET))
