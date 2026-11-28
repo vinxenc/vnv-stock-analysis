@@ -100,6 +100,15 @@ Done when the CSV exists, the look-ahead check passes and the README lists the s
 
 Both models on the same folds, both labels (`beat_median` first, `hit_3pct_5` second).
 
+Settings fixed before the first real run (2026-11-28, `research/models.py`; changing one after seeing the results is a new secondary configuration, listed in "Results"):
+- Inputs: the 21 columns of step 1 only (no `score`, no `turnover`). Training rows whose label is empty are dropped.
+- Logistic: every input z-scored per session with the step 2 helper, the binary ones too (as baseline 2; "Decisions" says binary inputs stay 0/1, changed here so one rule covers all, change if wrong). `C` from {0.001, 0.01, 0.1, 1, 10}, the one with the lowest mean log loss on the inner folds.
+- Inner walk-forward: the last 3 calendar months of each training window are its inner test months, each split with the same 5-session gap (`split`).
+- LightGBM: learning rate 0.05, `num_leaves` 7, `min_data_in_leaf` 300, `bagging_fraction` 0.7 every round, `feature_fraction` 0.7, seed 0, deterministic, 4 threads; at most 500 rounds, early stopping after 50 on each inner fold (log loss); the final model is fitted on the whole training window with the mean of the inner folds' best rounds. Isotonic calibration fitted on the inner folds' predictions only; the rank metrics use the raw probability, the Brier skill is reported for both.
+- Unstable coefficients (the trigger of the 6-theme rerun): an input is unstable when its logistic coefficient has the minority sign in 3 or more of the 10 folds; the rerun happens when 7 or more of the 21 inputs are unstable, for either label.
+- Overfitting (the trigger of the smaller LightGBM): LightGBM's mean training AUC exceeds its mean test-month AUC by 0.05 or more more than logistic's gap does, and its test numbers are not better than logistic's. The smaller one: `num_leaves` 3, `min_data_in_leaf` 1000, everything else the same.
+- `python -m research.models --check` runs both models on `beat_median` with the labels shuffled within each session (AUC must stay within 0.02 of 0.5) and with `excess_return_5` plus noise in place of `rsi14` (AUC above 0.7). It reports no real result.
+
 - [ ] L2 logistic, `C` chosen by an inner walk-forward on the training window only (never on the test months).
 - [ ] LightGBM with the small settings of "Decisions"; rounds by early stopping on the same inner walk-forward. Raw inputs (trees need no z-score; missing values stay missing, LightGBM handles them).
 - [ ] Same metrics as step 2 for both, plus calibration (bins of predicted probability vs observed share; LightGBM's probabilities are often over-confident, so try isotonic calibration on the inner folds), the logistic coefficients of every fold (sign stability per indicator) and LightGBM's gain importance per fold.
