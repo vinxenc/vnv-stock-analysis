@@ -1,6 +1,6 @@
 """Upsert the prices of a JSON array (see vn_stock_latest_price_retrieval) into the `vn_stock_prices` table, and
-record the newest session they hold in `vn_stock_price_sync_history` in the same transaction: the next sync fetches
-from the working day after it (vn_stock_price_sync_session). The file may hold the bars of several sessions.
+record every session they hold in `vn_stock_price_sync_history` (one row each) in the same transaction: the next sync
+fetches from the working day after the newest one (vn_stock_price_sync_session). The file may hold several sessions.
 
 Usage: DATABASE_URL=... uv run python -m scripts.vn_stock_daily_price_store [input_json]
 Default: out/vn_stock_latest_prices.json
@@ -43,11 +43,11 @@ def upsert(connection: Connection, prices: list[Price]) -> None:
         connection.execute(statement.on_conflict_do_update(index_elements=["symbol", "date"], set_=changed))
 
 
-def store(prices: list[Price], engine: Engine, synced: dt.date) -> None:
-    """Upsert in one transaction, all rows or none, and record the session `synced` in the same transaction."""
+def store(prices: list[Price], engine: Engine, synced: list[dt.date]) -> None:
+    """Upsert in one transaction, all rows or none, and record the sessions `synced` in the same transaction."""
     with engine.begin() as connection:
         upsert(connection, prices)
-        connection.execute(insert(PriceSyncHistory).values(date=synced).on_conflict_do_nothing())
+        connection.execute(insert(PriceSyncHistory).values([{"date": day} for day in synced]).on_conflict_do_nothing())
 
 
 def main(
@@ -58,7 +58,7 @@ def main(
         log.error("%s holds no price, nothing stored", input_json)
         return NO_DATA
     sessions = sorted({price.date for price in prices})
-    store(prices, engine or connect(), sessions[-1])
+    store(prices, engine or connect(), sessions)
     log.info("stored %d prices of %d sessions, %s to %s", len(prices), len(sessions), sessions[0], sessions[-1])
     return 0
 
