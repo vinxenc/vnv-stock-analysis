@@ -1,6 +1,6 @@
 # Phase 3 — Logistic regression and LightGBM on the screening indicators
 
-Status: **in progress** (2026-11-14; LightGBM added the same day). Steps 0 and 1 are done (2026-11-26; the look-ahead check ran on production on 2026-11-27 and found 46 differences (exit 1), every one explained by two bars re-stored after the live run, none a panel bug). Next: step 2. Research first (`research/`), pipeline only if it wins. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** Related: [phase-1-sql-screens.md](phase-1-sql-screens.md) ("Scoring design", whose weights and thresholds are placeholders), [phase-4-foundation-model-forecasts.md](phase-4-foundation-model-forecasts.md) (why the zero-shot forecasters were set aside), [phase-5-rd-agent.md](phase-5-rd-agent.md).
+Status: **in progress** (2026-11-14; LightGBM added the same day). Steps 0 and 1 are done (2026-11-26; the look-ahead check ran on production on 2026-11-27 and found 46 differences (exit 1), every one explained by two bars re-stored after the live run, none a panel bug). Step 2 is done (2026-11-28): neither baseline has a signal, see "Results". Next: step 3. Research first (`research/`), pipeline only if it wins. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** Related: [phase-1-sql-screens.md](phase-1-sql-screens.md) ("Scoring design", whose weights and thresholds are placeholders), [phase-4-foundation-model-forecasts.md](phase-4-foundation-model-forecasts.md) (why the zero-shot forecasters were set aside), [phase-5-rd-agent.md](phase-5-rd-agent.md).
 
 ## Goal
 
@@ -19,7 +19,7 @@ Possible outcomes, all useful:
 - Label: 1 when the symbol's 5-session forward return beats the cross-sectional **median** of that session, else 0 (balanced classes, market direction removed). Second label, evaluated the same way: `hit_3pct_5` = `close(t+5) ≥ close(t) × 1.03`, Phase 2's definition of a right buy, so the results here compare with Phase 2's deciders.
 - **How `hit_3pct_5` is judged** (review-debt item 3). This label follows the market: in a good week most symbols reach +3%, in a bad week few do. Pooled AUC therefore mixes sessions, and it is not comparable between the two models: logistic on per-session z-scores cannot see the market level, while LightGBM on raw inputs can learn regimes from about 75 periods. Rank IC is cross-sectional, while Phase 2 uses an absolute target. So `hit_3pct_5` is judged on what Phase 2 step 9 measures, with the session as the unit:
   - **Precision lift:** per session, the hit rate of the top fifth by predicted probability minus that session's base rate (the share of the same population that hit). Report its mean over the test sessions and its t-stat on non-overlapping sessions, the same way as the IC. The top fifth stands in for Phase 2's buy rule, which is still open (Phase 2 step 9). It is cross-sectional, so the absolute level is carried by the Brier skill below.
-  - **Brier skill:** `1 − Brier(model) / Brier(base-rate predictor)` over the test sessions. The base-rate predictor gives every row the share of `hit_3pct_5 = 1` in its training window, on the same population (the candidates' share for the candidates' numbers, 0.257 against 0.238 on production). The same-session share is not known at `t`, so it is never the bar. A plain sign: above 0, and above 0 in most test months.
+  - **Brier skill:** `1 − Brier(model) / Brier(base-rate predictor)`, pooled over the test rows, and per test month. The base-rate predictor gives every row the share of `hit_3pct_5 = 1` in its training window, on the same population (the candidates' share for the candidates' numbers, 0.257 against 0.238 on production). The same-session share is not known at `t`, so it is never the bar. A plain sign: above 0, and above 0 in most test months.
   - AUC and rank IC are still reported for `hit_3pct_5`, for reference only.
   - Baselines 1 and 2 (step 2) are ranks, not probabilities. They are measured on the precision lift only, and the Brier bar is the base-rate predictor.
 - **One primary configuration, a hold-out used once** (review-debt item 7). Steps 3 and 4 try 2 models × 2 labels × up to 3 input sets on about 10 test months, so one would pass by chance.
@@ -90,11 +90,11 @@ Done when the CSV exists, the look-ahead check passes and the README lists the s
 
 ## Step 2. Baselines (the bar to beat)
 
-- [ ] Walk-forward evaluation helper shared with step 3: monthly folds, expanding training window, **5-session gap** between training and test, metrics on the test months only. It never uses a session of the hold-out (from 2026-09-01, see "Decisions"), neither for training nor for testing. The one look per label is a separate run, made on purpose after step 4.
-- [ ] Metrics: AUC; rank IC per session (Spearman of prediction vs `fwd_return_5`) with its t-stat computed on **non-overlapping sessions** (every 5th session, averaged over the 5 offsets; the overlapping t-stat inflated TiRex-2's result, see the foundation-model plan); top-fifth minus bottom-fifth return; for `hit_3pct_5`, the precision lift and the Brier skill of "Decisions" (per session, against the same session's base rate and the training window's base rate). The helper reports each metric twice, on the whole universe and on the candidates (`score >= MIN_SCORE`, see "Decisions"), from the same predictions; steps 3 and 4 and Phase 2's TabICL backtest use the same helper, so their numbers come in both forms too.
-- [ ] Baseline 1: the current `score`.
-- [ ] Baseline 2: equal-weight mean of the standardised inputs (no learning).
-- [ ] Write the numbers into this file ("Results").
+- [x] Walk-forward evaluation helper shared with step 3 (`research/walk_forward.py`): monthly folds, expanding training window, **5-session gap** between training and test, metrics on the test months only. It never uses a session of the hold-out (from 2026-09-01, see "Decisions"), neither for training nor for testing. The one look per label is a separate run, made on purpose after step 4.
+- [x] Metrics: AUC; rank IC per session (Spearman of prediction vs `fwd_return_5`) with its t-stat computed on **non-overlapping sessions** (every 5th session, averaged over the 5 offsets; the overlapping t-stat inflated TiRex-2's result, see the foundation-model plan); top-fifth minus bottom-fifth return; for `hit_3pct_5`, the precision lift and the Brier skill of "Decisions" (per session, against the same session's base rate and the training window's base rate). The helper reports each metric twice, on the whole universe and on the candidates (`score >= MIN_SCORE`, see "Decisions"), from the same predictions; steps 3 and 4 and Phase 2's TabICL backtest use the same helper, so their numbers come in both forms too.
+- [x] Baseline 1: the current `score` (`research/baselines.py`).
+- [x] Baseline 2: equal-weight mean of the standardised inputs (no learning). Chosen while building it, change if wrong: every input is z-scored per session, the binary ones too, so each weighs the same. Each is oriented the way `scoring.py` rewards it: `sessions_since_cross` and `return_volatility` reversed; `close_vs_sma20` counts once, as #1, though #19 rewards the opposite.
+- [x] Write the numbers into this file ("Results").
 
 ## Step 3. Logistic regression and LightGBM, 21 inputs
 
@@ -153,3 +153,60 @@ Fill in per phase: date, sessions, rows, metrics, coefficients.
 **Step 1, local database (2026-11-26)**, prices from 2025-01-02 to 2026-11-09 (406 symbols): 41,439 rows over 390 sessions (2025-04-17 to 2026-11-09), about 106 symbols per session, more than the about 34,000 rows expected. `beat_median = 1` share per session: 0.458 to 0.500 (below 0.5 when ties or an odd count leave the median row at 0). `hit_3pct_5 = 1` share: 0.242 of 40,962 labelled rows on the whole universe, 0.260 of 13,289 on the candidates (`score >= 40`). Candidates per session: median 28, minimum 6, no session without one. About 50 s on a laptop.
 
 **Step 1, production (2026-11-27)**, prices up to 2026-11-26: 42,524 rows over 402 sessions (2025-04-17 to 2026-11-26). `beat_median = 1` share per session: 0.458 to 0.500. `hit_3pct_5 = 1` share: 0.238 of 42,037 on the whole universe, 0.257 of 13,591 on the candidates. Candidates per session: median 28, minimum 6, none without. Look-ahead check: see step 1.
+
+**Step 2, baselines (2026-11-28)**, on `out/features.csv` of the production run of step 1 (2025-04-17 to 2026-11-26). Walk-forward test months 2025-11 to 2026-08: 205 sessions, hold-out untouched. `uv run --group research python -m research.baselines`, about 15 s. Base rate of `hit_3pct_5` on these test months: 0.215 on the whole universe, 0.211 on the candidates (below the whole panel's 0.238 and 0.257, so the share drifts, as step 1 expected). No session had fewer than 5 candidates.
+
+| metric | score / universe | score / candidates | equal weight / universe | equal weight / candidates |
+|---|---|---|---|---|
+| rows | 20,611 | 5,651 | 20,875 | 5,651 |
+| AUC `beat_median` | 0.487 | 0.487 | 0.484 | 0.487 |
+| AUC `hit_3pct_5` | 0.482 | 0.511 | 0.499 | 0.523 |
+| rank IC, mean | −0.031 | −0.067 | −0.026 | −0.050 |
+| rank IC, non-overlapping t | −0.85 | −1.94 | −0.71 | −1.32 |
+| months with IC > 0 | 5 of 10 | 2 of 10 | 3 of 10 | 3 of 10 |
+| top minus bottom fifth, 5-session return | −0.04% | −0.67% | −0.07% | −0.44% |
+| precision lift (top fifth), mean | +0.012 | −0.009 | +0.007 | +0.024 |
+| precision lift, non-overlapping t | 0.69 | −0.35 | 0.37 | 0.72 |
+
+The universe's `score` column has 264 fewer rows than the equal-weight one: rows without a score (not scored by the gates) are dropped from that baseline.
+
+Monthly mean rank IC (step 3's "beats both baselines in most months" compares with these):
+
+| month | score / universe | score / candidates | equal_weight / universe | equal_weight / candidates |
+|---|---|---|---|---|
+| 2025-11 | -0.0372 | 0.0489 | -0.0410 | 0.0695 |
+| 2025-12 | 0.0973 | -0.0408 | 0.0981 | 0.0612 |
+| 2026-01 | 0.0585 | 0.0288 | 0.0652 | -0.0048 |
+| 2026-02 | 0.0238 | -0.0425 | -0.0344 | -0.0670 |
+| 2026-03 | -0.2312 | -0.2284 | -0.1427 | -0.1840 |
+| 2026-04 | -0.0763 | -0.0455 | -0.0385 | 0.0045 |
+| 2026-05 | -0.0875 | -0.0379 | -0.0859 | -0.0181 |
+| 2026-06 | 0.0044 | -0.1056 | -0.0049 | -0.1461 |
+| 2026-07 | 0.0456 | -0.0968 | 0.0343 | -0.0999 |
+| 2026-08 | -0.1099 | -0.1236 | -0.1273 | -0.1030 |
+
+Monthly mean precision lift:
+
+| month | score / universe | score / candidates | equal_weight / universe | equal_weight / candidates |
+|---|---|---|---|---|
+| 2025-11 | 0.0211 | 0.1478 | 0.0234 | 0.2032 |
+| 2025-12 | 0.1114 | -0.0198 | 0.0822 | 0.0250 |
+| 2026-01 | 0.0570 | 0.0574 | 0.0533 | 0.0464 |
+| 2026-02 | 0.0573 | -0.0292 | 0.0470 | -0.0740 |
+| 2026-03 | -0.0231 | -0.0337 | -0.0232 | -0.0440 |
+| 2026-04 | -0.0086 | 0.0073 | 0.0049 | 0.1101 |
+| 2026-05 | 0.0325 | -0.0109 | 0.0258 | 0.0260 |
+| 2026-06 | 0.0040 | -0.1076 | -0.0109 | -0.0924 |
+| 2026-07 | -0.0667 | -0.0625 | -0.0720 | 0.0027 |
+| 2026-08 | -0.0512 | -0.0216 | -0.0452 | 0.0350 |
+
+Reading:
+- Neither baseline has a signal on these months. Every t-stat is under 2 in absolute value, and every AUC is between 0.48 and 0.53 (the highest, 0.523, is equal weight on the candidates for `hit_3pct_5`, with a lift t of 0.72).
+- The `score` leans slightly the wrong way, mostly on the candidates (IC −0.067, t −1.94, 8 of 10 months negative; March 2026 alone −0.23). A higher score has meant a slightly lower 5-session return. This is a hint for step 3 (look for inputs whose sign the score has backwards, and for short-term reversal in step 4), not a result: it misses t = 2.
+- So step 3's go / no-go is mostly a bar against "no signal": the two baselines are about zero.
+- The helper was checked before these numbers were trusted (2026-11-28). `tests/` never imports `research/`, so every check below but the random one is kept as `uv run --group research python -m research.walk_forward` (asserts, exit 0 when they hold). The same numbers came out of a clean environment built from `uv.lock` alone (`uv run --isolated`):
+  - A prediction equal to `fwd_return_5` gives IC 1.0 and AUC `hit_3pct_5` 1.0.
+  - A random one gives IC −0.01 (t −0.6) and AUC 0.49 to 0.50.
+  - The training base rate used as the model gives a Brier skill of exactly 0 on the universe.
+  - Every fold has 5 panel sessions between its last training date and its first test date.
+  - No test row is on or after 2026-09-01. The hold-out's first session is 2026-09-03.
