@@ -55,12 +55,14 @@ def inner_folds(train: pd.DataFrame) -> list[tuple[pd.DataFrame, pd.DataFrame]]:
 
 def logistic(label: str, folds: list[Fold]) -> Callable[[pd.DataFrame, pd.DataFrame], pd.Series]:
     def fit(c: float, rows: pd.DataFrame) -> LogisticRegression:
-        return LogisticRegression(C=c, max_iter=1000).fit(zscore(rows, INPUTS), rows[label])
+        return LogisticRegression(C=c, max_iter=1000).fit(rows[INPUTS], rows[label])
 
     def predict(model: LogisticRegression, rows: pd.DataFrame) -> pd.Series:
-        return pd.Series(model.predict_proba(zscore(rows, INPUTS))[:, 1], index=rows.index)
+        return pd.Series(model.predict_proba(rows[INPUTS])[:, 1], index=rows.index)
 
     def fit_predict(train: pd.DataFrame, test: pd.DataFrame) -> pd.Series:
+        # z-score over every row of a session, then drop the unlabelled ones, as the test rows are scored
+        train = train.assign(**zscore(train, INPUTS))
         train = train[train[label].notna()]
         inner = inner_folds(train)
         loss = {
@@ -71,12 +73,13 @@ def logistic(label: str, folds: list[Fold]) -> Callable[[pd.DataFrame, pd.DataFr
         model = fit(c, train)
         folds.append(
             {
+                "month": str(test["date"].min())[:7],
                 "C": c,
                 "train_auc": auc(predict(model, train), train[label]),
                 **dict(zip(INPUTS, model.coef_[0], strict=True)),
             }
         )
-        return predict(model, test)
+        return predict(model, test.assign(**zscore(test, INPUTS)))
 
     return fit_predict
 
@@ -108,6 +111,7 @@ def lightgbm(label: str, folds: list[Fold]) -> Callable[[pd.DataFrame, pd.DataFr
         gain = booster.feature_importance("gain")
         folds.append(
             {
+                "month": str(test["date"].min())[:7],
                 "rounds": n,
                 "train_auc": auc(pd.Series(booster.predict(train[INPUTS]), index=train.index), train[label]),
                 "calibrated": iso.predict(raw),
@@ -133,6 +137,36 @@ def calibration(predicted: pd.DataFrame, label: str) -> pd.DataFrame:
     rows = predicted[predicted[label].notna()]
     bins = pd.qcut(rows["pred"], 10, labels=False, duplicates="drop")
     return rows.groupby(bins).agg(pred=("pred", "mean"), observed=(label, "mean"), rows=(label, "size"))
+
+
+def session_auc(predicted: pd.DataFrame, label: str) -> float:
+    """Mean AUC within a session (sessions with both classes), so the market level of a session plays no part."""
+    rows = predicted[predicted[label].notna() & predicted["pred"].notna()]
+    rows = rows.groupby("date").filter(lambda g: g[label].nunique() == 2)
+    return float(rows.groupby("date").apply(lambda g: auc(g["pred"], g[label])).mean())
+
+
+def volatility_check(df: pd.DataFrame, predicted: dict[str, pd.DataFrame], label: str) -> list[str]:
+    """Pooled vs within-session AUC of each model and of `return_volatility` alone (universe), and the shares of
+    +3% and -3% moves by its per-session quintile: whether a high AUC is the market level, volatility or a leak."""
+    vol = walk_forward(df, lambda _train, test: test["return_volatility"])
+    aucs = {m: (round(auc(p["pred"], p[label]), 3), round(session_auc(p, label), 3)) for m, p in predicted.items()}
+    aucs["return_volatility alone"] = (round(auc(vol["pred"], vol[label]), 3), round(session_auc(vol, label), 3))
+    vol = vol.dropna(subset=["pred", "fwd_return_5"])
+    quintile = (vol.groupby("date")["pred"].rank(pct=True) * 5).clip(upper=4.999).astype(int) + 1
+    shares = vol.groupby(quintile.rename("quintile")).agg(
+        hit=("hit_3pct_5", "mean"),
+        drop_3pct=("fwd_return_5", lambda r: (r <= -0.03).mean()),
+        ret=("fwd_return_5", "mean"),
+    )
+    return [
+        f"AUC on `{label}`, (pooled, within session), universe: {aucs}",
+        "",
+        "By `return_volatility` quintile:",
+        "",
+        *table(shares),
+        "",
+    ]
 
 
 def table(frame: pd.DataFrame, digits: int = 4) -> list[str]:
@@ -181,12 +215,11 @@ def main(features_csv: Path = Path("out/features.csv"), output_md: Path = Path("
                 skill["lightgbm, isotonic"] = round(float(iso["brier_skill"]), 4)
                 months["lightgbm, isotonic"] = int((iso["monthly"]["brier_skill"] > 0).sum())
                 out += [f"Brier skill, {population}: {skill}; months above 0: {months}", ""]
+        if probability:
+            out += volatility_check(df, {m: p for m, (p, _) in extra.items()}, label)
         for model, (predicted, folds) in extra.items():
-            fold_frame = pd.DataFrame(folds, index=sorted(predicted["month"].unique())).drop(
-                columns="calibrated", errors="ignore"
-            )
+            fold_frame = pd.DataFrame(folds).set_index("month").drop(columns="calibrated", errors="ignore")
             test_auc = predicted.groupby("month").apply(lambda g, label=label: auc(g["pred"], g[label]))
-            fold_frame.index.name = "month"
             summary = fold_frame.drop(columns=INPUTS).assign(test_auc=test_auc)
             out += [f"### {model} on `{label}`: per fold", "", *table(summary), ""]
             train_auc, test_auc = summary["train_auc"].mean(), summary["test_auc"].mean()
@@ -229,9 +262,10 @@ def check(features_csv: Path = Path("out/features.csv")) -> None:
     labels = ["fwd_return_5", "excess_return_5", "beat_median", "hit_3pct_5"]
     shuffled[labels] = df.groupby("date")[labels].transform(lambda s: s.sample(frac=1, random_state=rng).to_numpy())
     planted = df.assign(rsi14=df["excess_return_5"] + rng.normal(0, df["excess_return_5"].std(), len(df)))
+    rows = evaluate(walk_forward(df, BASELINES["equal_weight"]))["universe"]["rows"]
     for model in MODELS:
         noise = evaluate(run(shuffled, model, "beat_median")[0])["universe"]
-        assert noise["rows"] == 20_447, noise["rows"]
+        assert noise["rows"] == rows, (noise["rows"], rows)
         assert abs(noise["auc_beat_median"] - 0.5) < 0.02, (model, noise["auc_beat_median"])
         signal = evaluate(run(planted, model, "beat_median")[0])["universe"]["auc_beat_median"]
         assert signal > 0.7, (model, signal)

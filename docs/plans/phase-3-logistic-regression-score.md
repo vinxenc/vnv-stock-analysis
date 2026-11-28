@@ -220,14 +220,14 @@ Reading:
   - Every fold has 5 panel sessions between its last training date and its first test date.
   - The last test session is 5 panel sessions before 2026-09-01, so no label reads a hold-out bar. The hold-out's first session is 2026-09-03.
 
-**Step 3, logistic and LightGBM on the 21 inputs (2026-11-28)**, same CSV, folds and test months as step 2 (2025-11 to 2026-08, 200 sessions, 20,447 rows on the universe, 5,493 on the candidates; hold-out untouched). `uv run --group research python -m research.models`, about 25 s; the full tables (per fold, coefficients, gain importance, calibration) go to `out/models.md`. The settings are the ones fixed in step 3 before this run (commit `921403e`); `--check` passed first (shuffled labels: AUC 0.502 logistic, 0.498 LightGBM; planted signal: 0.776, 0.778). Two runs gave the same numbers.
+**Step 3, logistic and LightGBM on the 21 inputs (2026-11-28)**, same CSV, folds and test months as step 2 (2025-11 to 2026-08, 200 sessions, 20,447 rows on the universe, 5,493 on the candidates; hold-out untouched). `uv run --group research python -m research.models`, about 25 s; the full tables (per fold, coefficients, gain importance, calibration) go to `out/models.md`. The settings are the ones fixed in step 3 before this run (commit `921403e`); `--check` passed first (shuffled labels: AUC 0.502 logistic, 0.498 LightGBM; planted signal: 0.776, 0.778). Two runs gave the same numbers. After the code review of the same day, logistic z-scores a training session over all its rows before dropping the unlabelled ones, as the test rows are; the numbers above are from that run (the logistic ones moved in the third decimal, IC t on the candidates 2.34 → 2.30).
 
 | metric | logistic `beat_median` / universe | / candidates | LightGBM `beat_median` / universe | / candidates |
 |---|---|---|---|---|
 | AUC `beat_median` | 0.516 | 0.529 | 0.520 | 0.547 |
-| rank IC, mean | 0.042 | 0.088 | 0.049 | 0.060 |
-| rank IC, non-overlapping t | 1.56 | 2.34 | 1.74 | 1.48 |
-| months IC above both baselines | 7 of 10 | 8 of 10 | 8 of 10 | 8 of 10 |
+| rank IC, mean | 0.042 | 0.087 | 0.049 | 0.060 |
+| rank IC, non-overlapping t | 1.56 | 2.30 | 1.74 | 1.48 |
+| months IC above both baselines | 8 of 10 | 8 of 10 | 8 of 10 | 8 of 10 |
 | top minus bottom fifth, 5-session return | +0.2% | +1.0% | +0.4% | +0.6% |
 | mean train AUC / test AUC (universe) | 0.550 / 0.514 | | 0.590 / 0.521 | |
 
@@ -235,9 +235,9 @@ Reading:
 |---|---|---|---|---|
 | AUC `hit_3pct_5` (reference only) | 0.531 | 0.544 | 0.592 | 0.552 |
 | precision lift (top fifth), mean | +0.029 | +0.023 | +0.040 | +0.014 |
-| precision lift, non-overlapping t | 1.66 | 0.73 | 2.53 | 0.54 |
+| precision lift, non-overlapping t | 1.68 | 0.75 | 2.53 | 0.54 |
 | months lift above both baselines | 6 of 10 | 4 of 10 | 7 of 10 | 4 of 10 |
-| Brier skill (months above 0) | 0.0010 (5) | −0.0001 (4) | 0.0225 (9) | 0.0152 (7) |
+| Brier skill (months above 0) | 0.0011 (5) | −0.0001 (4) | 0.0225 (9) | 0.0152 (7) |
 | Brier skill after isotonic (months above 0) | | | 0.0178 (6) | 0.0190 (7) |
 | mean train AUC / test AUC (universe) | 0.555 / 0.539 | | 0.660 / 0.591 | |
 
@@ -245,16 +245,16 @@ Logistic chose `C` = 0.001, the bottom edge of the grid and its strongest penalt
 
 Rules of step 3, applied as fixed:
 - **6-theme rerun: not triggered.** Unstable inputs: 4 of 21 for `beat_median` (`close_vs_sma20`, `sma50_change`, `return_60`, `rsi_divergence`), 2 for `hit_3pct_5` (`sma50_change`, `rsi_divergence`), below 7.
-- **Smaller LightGBM: not triggered.** The gap beyond logistic's is 0.032 for `beat_median` (below 0.05). For `hit_3pct_5` it is 0.053, but LightGBM's test numbers are better than logistic's on the universe (AUC, lift t, Brier skill), so the second condition fails. On the candidates its lift t is lower (0.54 against 0.73) and its Brier skill higher.
+- **Smaller LightGBM: not triggered.** The gap beyond logistic's is 0.032 for `beat_median` (below 0.05). For `hit_3pct_5` it is 0.053, but LightGBM's test numbers are better than logistic's on the universe (AUC, lift t, Brier skill), so the second condition fails. On the candidates its lift t is lower (0.54 against 0.75) and its Brier skill higher.
 - **Secondary replaces primary**, `hit_3pct_5`: no. LightGBM has the higher lift t on the universe (2.53 against 1.66) but is better in only 5 of 10 months, and on the candidates its t is lower. The primary stays logistic.
-- **Secondary replaces primary**, `beat_median`: **open, depends on the population.** On the universe LightGBM has the higher IC t (1.74 against 1.56) and is better in 6 of 10 months, so it replaces logistic; on the candidates it does not (t 1.48 against 2.34, better in 3 of 10).
+- **Secondary replaces primary**, `beat_median`: **open, depends on the population.** On the universe LightGBM has the higher IC t (1.74 against 1.56) and is better in 6 of 10 months, so it replaces logistic; on the candidates it does not (t 1.48 against 2.30, better in 3 of 10).
 - **Three rules name no population:** this replace rule, the smaller-LightGBM trigger (not triggered on the universe's numbers, mixed on the candidates') and the `beat_median` go / no-go (logistic passes on the candidates, fails on the universe). To settle with the user before step 4; whatever is chosen is chosen after seeing these results, and the plan must say so.
 
 Reading (the go / no-go waits for step 4 and the hold-out):
-- **A first signal on `beat_median`, from the logistic primary on the candidates:** AUC 0.529, IC t 2.34, IC above both baselines in 8 of 10 months, the three bars of the go / no-go on the test months. On the universe it falls short (AUC 0.516, t 1.56). The baselines' IC on the same months was negative (step 2), so the learned weights differ from the hand-set ones.
+- **A first signal on `beat_median`, from the logistic primary on the candidates:** AUC 0.529, IC t 2.30, IC above both baselines in 8 of 10 months, the three bars of the go / no-go on the test months. On the universe it falls short (AUC 0.516, t 1.56). The baselines' IC on the same months was negative (step 2), so the learned weights differ from the hand-set ones.
 - **The logistic coefficients say why the score fails.** With a stable sign in every fold, the model rewards `close_vs_sma50`, `sma20_above_sma50`, `rsi14`, `ppo_histogram` and `up_down_volume_ratio`, and penalises `return_20` (short-term reversal), `return_volatility`, `turnover_ratio`, `close_location`, `close_vs_prior_high`, `higher_lows` and `candle_pattern`. The score gives points to several of the penalised ones.
-- **`hit_3pct_5`:** the primary (logistic) fails every bar (lift t 1.66 / 0.73, Brier skill about 0). LightGBM reaches lift t 2.53 and a positive Brier skill in 9 of 10 months on the universe, but not on the candidates, the population Phase 2 decides.
-- **LightGBM's AUC on `hit_3pct_5` is volatility, not a leak and not market timing.** It is 0.592 pooled and 0.60 or more in 5 of 10 test months (the plan's leak bar), but 0.580 within a session (mean over 199 sessions), so the market level explains little. `return_volatility` alone gives 0.591 pooled and 0.573 within a session. A volatile stock crosses +3% more often and −3% more often: by quintile of `return_volatility` on the test months, the share reaching +3% goes from 0.171 to 0.262, the share falling 3% or more from 0.161 to 0.350, and the mean 5-session return from +0.1% to −0.4%. The input is computed up to t (step 1's look-ahead check), so no leak.
-- **The `hit_3pct_5` logistic model ranks by volatility too:** `return_volatility` is +0.095 there against −0.099 for `beat_median`. Its rank IC against the 5-session return is −0.063 (t −2.23), top minus bottom −0.4%: it finds stocks that reach +3% more often but return less. Neither the precision lift nor the Brier skill sees that. For step 5c it means a buy on `P(hit_3pct_5)` buys volatility; the go / no-go of `hit_3pct_5` may need a return bar as well.
+- **`hit_3pct_5`:** the primary (logistic) fails every bar (lift t 1.68 / 0.75, Brier skill about 0). LightGBM reaches lift t 2.53 and a positive Brier skill in 9 of 10 months on the universe, but not on the candidates, the population Phase 2 decides.
+- **LightGBM's AUC on `hit_3pct_5` is volatility, not a leak and not market timing.** It is 0.592 pooled and 0.60 or more in 5 of 10 test months (the plan's leak bar), but 0.580 within a session (mean over 199 sessions), so the market level explains little. `return_volatility` alone gives 0.591 pooled and 0.573 within a session. A volatile stock crosses +3% more often and −3% more often: by quintile of `return_volatility` on the test months, the share reaching +3% goes from 0.171 to 0.262, the share falling 3% or more from 0.161 to 0.350, and the mean 5-session return from +0.1% to −0.4% (all printed by `research/models.py`, after the `hit_3pct_5` tables). The input is computed up to t (step 1's look-ahead check), so no leak.
+- **The `hit_3pct_5` logistic model ranks by volatility too:** `return_volatility` is +0.094 there against −0.099 for `beat_median`. Its rank IC against the 5-session return is −0.063 (t −2.22), top minus bottom −0.4%: it finds stocks that reach +3% more often but return less. Neither the precision lift nor the Brier skill sees that. For step 5c it means a buy on `P(hit_3pct_5)` buys volatility; the go / no-go of `hit_3pct_5` may need a return bar as well.
 - **Many tries:** 8 cells (2 models × 2 labels × 2 populations, each label's main metric), 2 cross t ≥ 2 (logistic `beat_median` on the candidates, LightGBM `hit_3pct_5` on the universe), on different models and labels. Weak evidence; the hold-out decides.
-- Calibration: logistic on `hit_3pct_5` is too high in every decile (0.22–0.35 against 0.18–0.26 observed: the training base rate, 0.238, is above the test months' 0.218). LightGBM's raw probabilities are also too high at the top; isotonic lowers the Brier skill on the universe (0.0225 to 0.0178) and raises it on the candidates.
+- Calibration: logistic on `hit_3pct_5` is too high in every decile (0.22–0.35 against 0.18–0.26 observed: the training base rate, 0.238, is above the test months' 0.218). LightGBM's raw probabilities are also too high at the top; isotonic lowers the Brier skill on the universe (0.0225 to 0.0178) and raises it on the candidates. The calibrated numbers are approximate: the map is fitted on the inner folds' boosters (shorter windows, each at its own best round, chosen by early stopping on the very fold the map is fitted on), then applied to the final booster (whole window, mean round count). Kept as fixed before the run; a cleaner calibration would be a new secondary configuration.
