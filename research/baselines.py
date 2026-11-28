@@ -30,32 +30,21 @@ def score(_train: pd.DataFrame, test: pd.DataFrame) -> pd.Series:
 
 def equal_weight(_train: pd.DataFrame, test: pd.DataFrame) -> pd.Series:
     z = zscore(test, INPUTS)
-    signs = pd.Series({column: -1.0 if column in LOWER_IS_BETTER else 1.0 for column in INPUTS})
-    return (z * signs).mean(axis=1)
+    z[list(LOWER_IS_BETTER)] *= -1
+    return z.mean(axis=1)
 
 
 BASELINES = {"score": score, "equal_weight": equal_weight}
-SUMMARY = [
-    ("rows", "{:,}"),
-    ("sessions", "{}"),
-    ("skipped_sessions", "{}"),
-    ("base_rate_hit", "{:.3f}"),
-    ("auc_beat_median", "{:.3f}"),
-    ("auc_hit", "{:.3f}"),
-    ("ic_mean", "{:.4f}"),
-    ("ic_t", "{:.2f}"),
-    ("top_bottom_mean", "{:.4f}"),
-    ("top_bottom_t", "{:.2f}"),
-    ("lift_mean", "{:.4f}"),
-    ("lift_t", "{:.2f}"),
-]
+SUMMARY = ["rows", "sessions", "skipped_sessions", "base_rate_hit", "auc_beat_median", "auc_hit"]
+SUMMARY += [f"{metric}_{stat}" for metric in ("ic", "top_bottom", "lift") for stat in ("mean", "t")]
 
 
 def markdown(reports: dict[str, dict[str, dict]]) -> str:
     columns = [(baseline, population) for baseline, report in reports.items() for population in report]
     lines = ["| metric | " + " | ".join(f"{b} / {p}" for b, p in columns) + " |", "|---" * (len(columns) + 1) + "|"]
-    for key, fmt in SUMMARY:
-        lines.append(f"| {key} | " + " | ".join(fmt.format(reports[b][p][key]) for b, p in columns) + " |")
+    for key in SUMMARY:
+        values = [reports[b][p][key] for b, p in columns]
+        lines.append(f"| {key} | " + " | ".join(f"{v:,}" if isinstance(v, int) else f"{v:.3f}" for v in values) + " |")
     for metric in ("ic", "lift"):
         monthly = pd.DataFrame({f"{b} / {p}": reports[b][p]["monthly"][metric] for b, p in columns})
         lines += ["", f"Monthly mean {metric}:", "", "| month | " + " | ".join(monthly.columns) + " |"]
@@ -64,13 +53,12 @@ def markdown(reports: dict[str, dict[str, dict]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main(features_csv: Path = Path("out/features.csv"), output_md: Path = Path("out/baselines.md")) -> int:
+def main(features_csv: Path = Path("out/features.csv"), output_md: Path = Path("out/baselines.md")) -> None:
     df = load(features_csv)
     reports = {name: evaluate(walk_forward(df, fit_predict)) for name, fit_predict in BASELINES.items()}
     output_md.write_text(markdown(reports), encoding="utf-8")
     log.info(f"baselines written to {output_md}")
-    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(*map(Path, sys.argv[1:])))
+    main(*map(Path, sys.argv[1:]))

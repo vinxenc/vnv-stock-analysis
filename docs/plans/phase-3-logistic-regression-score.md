@@ -1,6 +1,6 @@
 # Phase 3 — Logistic regression and LightGBM on the screening indicators
 
-Status: **in progress** (2026-11-14; LightGBM added the same day). Steps 0 and 1 are done (2026-11-26; the look-ahead check ran on production on 2026-11-27 and found 46 differences (exit 1), every one explained by two bars re-stored after the live run, none a panel bug). Step 2 is done (2026-11-28): neither baseline has a signal, see "Results". Next: step 3. Research first (`research/`), pipeline only if it wins. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** Related: [phase-1-sql-screens.md](phase-1-sql-screens.md) ("Scoring design", whose weights and thresholds are placeholders), [phase-4-foundation-model-forecasts.md](phase-4-foundation-model-forecasts.md) (why the zero-shot forecasters were set aside), [phase-5-rd-agent.md](phase-5-rd-agent.md).
+Status: **in progress** (2026-11-14; LightGBM added the same day). Steps 0 and 1 are done (2026-11-26; the look-ahead check ran on production on 2026-11-27 and found 46 differences (exit 1), every one explained by two bars re-stored after the live run, none a panel bug). Step 2 is done (2026-11-28, #41): neither baseline has a signal, see "Results". Next: step 3. Research first (`research/`), pipeline only if it wins. **Open review findings in [review-debt.md](review-debt.md): read them before starting a step.** Related: [phase-1-sql-screens.md](phase-1-sql-screens.md) ("Scoring design", whose weights and thresholds are placeholders), [phase-4-foundation-model-forecasts.md](phase-4-foundation-model-forecasts.md) (why the zero-shot forecasters were set aside), [phase-5-rd-agent.md](phase-5-rd-agent.md).
 
 ## Goal
 
@@ -27,7 +27,7 @@ Possible outcomes, all useful:
   - Step 5c needs a `hit_3pct_5` model, so that label has its own primary: logistic, the 21 base inputs. Chosen here, change if wrong. The reviewer named one configuration; a second one means a second look at the hold-out.
   - Every other run is a secondary configuration: LightGBM, the 6 themes, a smaller LightGBM, the inputs of step 4. Each is listed in "Results" with its numbers, so the count of what was tried is known.
   - A secondary replaces the primary of its label only if it beats it on the walk-forward test months by this rule: a higher non-overlapping t-stat of the label's main metric (IC for `beat_median`, precision lift for `hit_3pct_5`), and better in most months.
-  - **Hold-out:** every session from 2026-09-01 on (about the last 3 months of labelled sessions when this was written, 2026-11-28). The date is fixed and does not slide. Steps 2 to 4 never see it. The walk-forward ends with August 2026, and with the 5-session gap at the boundary: a training row whose `t+5` falls on or after 2026-09-01 is dropped.
+  - **Hold-out:** every session from 2026-09-01 on (about the last 3 months of labelled sessions when this was written, 2026-11-28). The date is fixed and does not slide. Steps 2 to 4 never see it. The walk-forward ends with August 2026, and with the 5-session gap at the boundary: a row, training or test, whose `t+5` falls on or after 2026-09-01 is dropped.
   - With a first training window of about 6 months (from 2025-04-17), that leaves about 10 walk-forward test months (2025-11 to 2026-08). Chosen here, change if wrong.
   - **One look per label**, so two at most, after step 4. The look scores the kept configuration of that label, trained on every row before the gap. It runs on the production database, because the local one ends 2026-11-09.
   - A fail on the hold-out is final for that label: no changed configuration is run on it again.
@@ -90,7 +90,7 @@ Done when the CSV exists, the look-ahead check passes and the README lists the s
 
 ## Step 2. Baselines (the bar to beat)
 
-- [x] Walk-forward evaluation helper shared with step 3 (`research/walk_forward.py`): monthly folds, expanding training window, **5-session gap** between training and test, metrics on the test months only. It never uses a session of the hold-out (from 2026-09-01, see "Decisions"), neither for training nor for testing. The one look per label is a separate run, made on purpose after step 4.
+- [x] Walk-forward evaluation helper shared with step 3 (`research/walk_forward.py`): monthly folds, expanding training window, **5-session gap** between training and test, metrics on the test months only. It never uses a session of the hold-out (from 2026-09-01, see "Decisions"), neither for training nor for testing, nor through a label (the last 5 sessions before it are dropped). The one look per label is a separate run, made on purpose after step 4.
 - [x] Metrics: AUC; rank IC per session (Spearman of prediction vs `fwd_return_5`) with its t-stat computed on **non-overlapping sessions** (every 5th session, averaged over the 5 offsets; the overlapping t-stat inflated TiRex-2's result, see the foundation-model plan); top-fifth minus bottom-fifth return; for `hit_3pct_5`, the precision lift and the Brier skill of "Decisions" (per session, against the same session's base rate and the training window's base rate). The helper reports each metric twice, on the whole universe and on the candidates (`score >= MIN_SCORE`, see "Decisions"), from the same predictions; steps 3 and 4 and Phase 2's TabICL backtest use the same helper, so their numbers come in both forms too.
 - [x] Baseline 1: the current `score` (`research/baselines.py`).
 - [x] Baseline 2: equal-weight mean of the standardised inputs (no learning). Chosen while building it, change if wrong: every input is z-scored per session, the binary ones too, so each weighs the same. Each is oriented the way `scoring.py` rewards it: `sessions_since_cross` and `return_volatility` reversed; `close_vs_sma20` counts once, as #1, though #19 rewards the opposite.
@@ -154,21 +154,21 @@ Fill in per phase: date, sessions, rows, metrics, coefficients.
 
 **Step 1, production (2026-11-27)**, prices up to 2026-11-26: 42,524 rows over 402 sessions (2025-04-17 to 2026-11-26). `beat_median = 1` share per session: 0.458 to 0.500. `hit_3pct_5 = 1` share: 0.238 of 42,037 on the whole universe, 0.257 of 13,591 on the candidates. Candidates per session: median 28, minimum 6, none without. Look-ahead check: see step 1.
 
-**Step 2, baselines (2026-11-28)**, on `out/features.csv` of the production run of step 1 (2025-04-17 to 2026-11-26). Walk-forward test months 2025-11 to 2026-08: 205 sessions, hold-out untouched. `uv run --group research python -m research.baselines`, about 15 s. Base rate of `hit_3pct_5` on these test months: 0.215 on the whole universe, 0.211 on the candidates (below the whole panel's 0.238 and 0.257, so the share drifts, as step 1 expected). No session had fewer than 5 candidates.
+**Step 2, baselines (2026-11-28)**, on `out/features.csv` of the production run of step 1 (2025-04-17 to 2026-11-26). Walk-forward test months 2025-11 to 2026-08, without the last 5 sessions of August (their label reads a hold-out bar; PR #41 review): 200 sessions, hold-out untouched. `uv run --group research python -m research.baselines`, about 15 s. Base rate of `hit_3pct_5` on these test months: 0.218 on the whole universe, 0.214 on the candidates (below the whole panel's 0.238 and 0.257, so the share drifts, as step 1 expected). No session had fewer than 5 candidates.
 
 | metric | score / universe | score / candidates | equal weight / universe | equal weight / candidates |
 |---|---|---|---|---|
-| rows | 20,611 | 5,651 | 20,875 | 5,651 |
-| AUC `beat_median` | 0.487 | 0.487 | 0.484 | 0.487 |
-| AUC `hit_3pct_5` | 0.482 | 0.511 | 0.499 | 0.523 |
-| rank IC, mean | −0.031 | −0.067 | −0.026 | −0.050 |
-| rank IC, non-overlapping t | −0.85 | −1.94 | −0.71 | −1.32 |
+| rows | 20,193 | 5,493 | 20,447 | 5,493 |
+| AUC `beat_median` | 0.486 | 0.486 | 0.484 | 0.487 |
+| AUC `hit_3pct_5` | 0.483 | 0.508 | 0.499 | 0.519 |
+| rank IC, mean | −0.032 | −0.070 | −0.025 | −0.051 |
+| rank IC, non-overlapping t | −0.84 | −1.97 | −0.67 | −1.32 |
 | months with IC > 0 | 5 of 10 | 2 of 10 | 3 of 10 | 3 of 10 |
-| top minus bottom fifth, 5-session return | −0.04% | −0.67% | −0.07% | −0.44% |
-| precision lift (top fifth), mean | +0.012 | −0.009 | +0.007 | +0.024 |
-| precision lift, non-overlapping t | 0.69 | −0.35 | 0.37 | 0.72 |
+| top minus bottom fifth, 5-session return | −0.0% | −0.7% | −0.1% | −0.4% |
+| precision lift (top fifth), mean | +0.012 | −0.013 | +0.006 | +0.024 |
+| precision lift, non-overlapping t | 0.65 | −0.47 | 0.32 | 0.70 |
 
-The universe's `score` column has 264 fewer rows than the equal-weight one: rows without a score (not scored by the gates) are dropped from that baseline.
+The universe's `score` column has 254 fewer rows than the equal-weight one: rows without a score (not scored by the gates) are dropped from that baseline.
 
 Monthly mean rank IC (step 3's "beats both baselines in most months" compares with these):
 
@@ -183,7 +183,7 @@ Monthly mean rank IC (step 3's "beats both baselines in most months" compares wi
 | 2026-05 | -0.0875 | -0.0379 | -0.0859 | -0.0181 |
 | 2026-06 | 0.0044 | -0.1056 | -0.0049 | -0.1461 |
 | 2026-07 | 0.0456 | -0.0968 | 0.0343 | -0.0999 |
-| 2026-08 | -0.1099 | -0.1236 | -0.1273 | -0.1030 |
+| 2026-08 | -0.1412 | -0.1804 | -0.1498 | -0.1317 |
 
 Monthly mean precision lift:
 
@@ -198,15 +198,15 @@ Monthly mean precision lift:
 | 2026-05 | 0.0325 | -0.0109 | 0.0258 | 0.0260 |
 | 2026-06 | 0.0040 | -0.1076 | -0.0109 | -0.0924 |
 | 2026-07 | -0.0667 | -0.0625 | -0.0720 | 0.0027 |
-| 2026-08 | -0.0512 | -0.0216 | -0.0452 | 0.0350 |
+| 2026-08 | -0.0786 | -0.0743 | -0.0737 | 0.0363 |
 
 Reading:
-- Neither baseline has a signal on these months. Every t-stat is under 2 in absolute value, and every AUC is between 0.48 and 0.53 (the highest, 0.523, is equal weight on the candidates for `hit_3pct_5`, with a lift t of 0.72).
-- The `score` leans slightly the wrong way, mostly on the candidates (IC −0.067, t −1.94, 8 of 10 months negative; March 2026 alone −0.23). A higher score has meant a slightly lower 5-session return. This is a hint for step 3 (look for inputs whose sign the score has backwards, and for short-term reversal in step 4), not a result: it misses t = 2.
+- Neither baseline has a signal on these months. Every t-stat is under 2 in absolute value, and every AUC is between 0.48 and 0.52.
+- The `score` leans slightly the wrong way, mostly on the candidates (IC −0.070, t −1.97, 8 of 10 months negative; March 2026 alone −0.23). A higher score has meant a slightly lower 5-session return. This is a hint for step 3 (look for inputs whose sign the score has backwards, and for short-term reversal in step 4), not a result: it misses t = 2.
 - So step 3's go / no-go is mostly a bar against "no signal": the two baselines are about zero.
 - The helper was checked before these numbers were trusted (2026-11-28). `tests/` never imports `research/`, so every check below but the random one is kept as `uv run --group research python -m research.walk_forward` (asserts, exit 0 when they hold). The same numbers came out of a clean environment built from `uv.lock` alone (`uv run --isolated`):
   - A prediction equal to `fwd_return_5` gives IC 1.0 and AUC `hit_3pct_5` 1.0.
   - A random one gives IC −0.01 (t −0.6) and AUC 0.49 to 0.50.
   - The training base rate used as the model gives a Brier skill of exactly 0 on the universe.
   - Every fold has 5 panel sessions between its last training date and its first test date.
-  - No test row is on or after 2026-09-01. The hold-out's first session is 2026-09-03.
+  - The last test session is 5 panel sessions before 2026-09-01, so no label reads a hold-out bar. The hold-out's first session is 2026-09-03.
